@@ -2,34 +2,46 @@ import { TfIdf, WordTokenizer } from 'natural';
 import { readdir } from "node:fs/promises";
 
 class ContentScraper {
-    contents: string[];
-    i: number;
-    constructor() {
-        this.contents = []
-        this.i = 0
+  contents: string[];
+  i: number;
+  constructor() {
+    this.contents = []
+    this.i = 0
+  }
+  text(text: HTMLRewriterTypes.Text) {
+    if (text.text.trim() === '') {
+      return
     }
-    text(text: HTMLRewriterTypes.Text) {
-        if (text.text.trim() === '') {
-            return
-        }
-        if (this.contents[this.i]) {
-            this.contents[this.i] += text.text
-        } else {
-            this.contents[this.i] = text.text
-        }
-        if (text.lastInTextNode) {
-            console.log(this.contents[this.i])
-            this.i++
-        }
+    if (this.contents[this.i]) {
+      this.contents[this.i] += text.text
+    } else {
+      this.contents[this.i] = text.text
     }
+    if (text.lastInTextNode) {
+      console.log(this.contents[this.i])
+      this.i++
+    }
+  }
 }
 
 function scrapeHtmlContent(html: string) {
-    const scraper = new ContentScraper();
+  const scraper = new ContentScraper();
 
-    new HTMLRewriter().on('*', scraper).transform(new Response(html));
+  new HTMLRewriter().on('*', scraper).transform(new Response(html));
 
-    return scraper.contents;
+  return scraper.contents;
+}
+
+function extractPageTitle(html: string) {
+  let title: string = '';
+
+  new HTMLRewriter().on('title', {
+    text(text) {
+      title += text.text
+    }
+  }).transform(new Response(html));
+
+  return title;
 }
 
 const tokenizer = new WordTokenizer();
@@ -37,18 +49,20 @@ const tfidf = new TfIdf();
 
 const files = await readdir('webpages');
 
-const docs: string[] = [];
+const docs: Array<{ url: string; title: string; }> = [];
 
 for (const path of files) {
-    const { url, content: html } = await Bun.file(`webpages/${path}`).json();
+  const { url, content: html } = await Bun.file(`webpages/${path}`).json();
 
-    docs.push(url);
+  const title = extractPageTitle(html);
 
-    const contents = scrapeHtmlContent(html);
+  docs.push({ url, title });
 
-    const tokens = contents.flatMap(word => tokenizer.tokenize(word))
+  const contents = scrapeHtmlContent(html);
 
-    tfidf.addDocument(tokens);
+  const tokens = contents.flatMap(word => tokenizer.tokenize(word))
+
+  tfidf.addDocument(tokens);
 }
 
 await Bun.write("docs.json", JSON.stringify(docs));

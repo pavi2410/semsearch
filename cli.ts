@@ -1,4 +1,5 @@
 import { TfIdf, WordTokenizer } from "natural";
+import { styleText } from "node:util";
 import docsList from "./docs.json";
 
 const indexJson = await Bun.file("./index.json").json();
@@ -7,8 +8,8 @@ const tokenizer = new WordTokenizer();
 
 const searchQuery = process.argv.slice(2).join(' ')
 
-console.log("Semsearch CLI")
-console.log(`Search results for "${searchQuery}"`);
+console.log("Semsearch CLI\n")
+console.log(`Search results for "${styleText('bold', searchQuery)}"`);
 const tokens = tokenizer.tokenize(searchQuery);
 
 const results = new Map<number, number>();
@@ -20,11 +21,12 @@ tfidf.tfidfs(tokens, (docIdx, score) => {
   }
 });
 const end = performance.now();
-console.log(`Found ${results.size} results in ${(end - start).toFixed(2)}ms`);
+console.log(styleText('dim', `Found ${results.size} results in ${(end - start).toFixed(2)}ms\n`));
 
 const sortedResults = Array.from(results.entries()).sort((a, b) => b[1] - a[1]);
 
 for (const [docIdx, score] of sortedResults.slice(0, 10)) {
   const doc = docsList[docIdx];
-  console.log(`${doc} (${score.toFixed(2)})`);
+  console.log(`${styleText('bold', doc.title)} (${score.toFixed(2)})
+↳ ${styleText('dim', styleText('underline', doc.url))}\n`);
 }
