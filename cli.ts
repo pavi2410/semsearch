@@ -10,7 +10,7 @@ const searchQuery = process.argv.slice(2).join(' ')
 
 console.log("Semsearch CLI\n")
 console.log(`Search results for "${styleText('bold', searchQuery)}"`);
-const tokens = tokenizer.tokenize(searchQuery);
+const tokens = tokenizer.tokenize(searchQuery.toLowerCase());
 
 const results = new Map<number, number>();
 

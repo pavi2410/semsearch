@@ -60,7 +60,7 @@ for (const path of files) {
 
   const contents = scrapeHtmlContent(html);
 
-  const tokens = contents.flatMap(word => tokenizer.tokenize(word))
+  const tokens = contents.flatMap(word => tokenizer.tokenize(word.toLowerCase()))
 
   tfidf.addDocument(tokens);
 }
