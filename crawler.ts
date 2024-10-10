@@ -15,13 +15,27 @@ async function crawl(startUrl: string): Promise<void> {
     if (visited.has(url)) continue;
 
     try {
-      const html = await fetchWebPage(url);
-      const filename = Bun.hash(url);
-      await Bun.write(`webpages/${new URL(url).hostname}_${filename}.json`, JSON.stringify({
-        url,
-        content: html,
-      }));
-      console.log(`Saved ${url} to ${filename}`);
+      const urlHash = Bun.hash(url);
+      const file = Bun.file(`webpages/${new URL(url).hostname}_${urlHash}.json`);
+
+      let html: string;
+      try {
+        const { lastFetchedAt = 0, content } = await file.json();
+        if (Date.now() - lastFetchedAt > 1000 * 60 * 60 * 24) {
+          throw new Error('File too old');
+        }
+        html = content;
+        console.log(`Skip fetching ${url}`);
+      } catch (error) {
+        // File does not exist or is stale; so fetch it
+        html = await fetchWebPage(url);
+        await Bun.write(file, JSON.stringify({
+          url,
+          lastFetchedAt: Date.now(),
+          content: html,
+        }));
+        console.log(`Saved ${url} to ${urlHash}`);
+      }
 
       visited.add(url);
 
