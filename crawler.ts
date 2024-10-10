@@ -41,7 +41,7 @@ async function crawl(startUrl: string): Promise<void> {
 
       const links = extractLinks(html, url);
       for (const link of links) {
-        if (!visited.has(link) && link.startsWith(startUrl)) {
+        if (!visited.has(link)) {
           queue.push(link);
         }
       }
@@ -74,6 +74,7 @@ function extractLinks(html: string, baseUrl: string): string[] {
 const urls = [
   'https://en.wikipedia.org',
   'https://news.ycombinator.com',
+  'https://www.reddit.com',
 ];
 
 console.time('crawl')
