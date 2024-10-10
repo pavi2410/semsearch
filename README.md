@@ -2,7 +2,7 @@
 
 This project implements a web search engine command-line interface (CLI) using the TF-IDF (Term Frequency-Inverse Document Frequency) algorithm. It is written in TypeScript and utilizes Bun APIs for improved performance.
 
-![image](https://github.com/user-attachments/assets/c9241e64-b146-4f7f-baf2-3f00ab88e516)
+![image](https://github.com/user-attachments/assets/c25dfcf4-b7ce-4c16-a0d2-8dad3785ba55)
 
 ## Getting Started
 
