@@ -1,0 +1,19 @@
+{
+  "name": "semsearch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "search": "bun run cli.ts",
+    "crawl": "bun run crawler.ts",
+    "index": "bun run indexer.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "natural": "^8.0.1"
+  }
+}
