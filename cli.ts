@@ -1,10 +1,10 @@
-import { LevenshteinDistanceSearch, TfIdf, WordTokenizer } from "natural";
+import { LevenshteinDistanceSearch, TfIdf, TreebankWordTokenizer } from "natural";
 import { styleText } from "node:util";
 import docsList from "./docs.json";
 
 const indexJson = await Bun.file("./tfidf.index.json").json();
 const tfidf = new TfIdf(indexJson);
-const tokenizer = new WordTokenizer();
+const tokenizer = new TreebankWordTokenizer();
 
 const searchQuery = process.argv.slice(2).join(' ')
 

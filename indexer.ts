@@ -1,4 +1,4 @@
-import { TfIdf, WordTokenizer } from 'natural';
+import { TfIdf, TreebankWordTokenizer } from 'natural';
 import { readdir } from "node:fs/promises";
 
 class ContentScraper {
@@ -44,7 +44,7 @@ function extractPageTitle(html: string) {
   return title;
 }
 
-const tokenizer = new WordTokenizer();
+const tokenizer = new TreebankWordTokenizer();
 const tfidf = new TfIdf();
 
 const files = await readdir('webpages');
