@@ -1,16 +1,12 @@
 import { TfIdf, TreebankWordTokenizer } from 'natural';
 import { readdir } from "node:fs/promises";
 
-function scrapeHtmlContent(html: string) {
+function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
   let i = 0;
-  const rewriter = new HTMLRewriter();
 
   rewriter.on('*', {
     text(text) {
-      if (text.text.trim() === '') {
-        return
-      }
       if (contents[i]) {
         contents[i] += text.text
       } else {
@@ -21,20 +17,18 @@ function scrapeHtmlContent(html: string) {
       }
     }
   });
-  
-  rewriter.transform(new Response(html));
 
   return contents;
 }
 
-function extractPageTitle(html: string) {
-  let title: string = '';
+function extractPageTitle(rewriter: HTMLRewriter) {
+  let title: [string] = [''];
 
-  new HTMLRewriter().on('title', {
+  rewriter.on('title', {
     text(text) {
-      title += text.text
+      title[0] += text.text
     }
-  }).transform(new Response(html));
+  });
 
   return title;
 }
@@ -49,11 +43,14 @@ const docs: Array<{ url: string; title: string; }> = [];
 for (const path of files) {
   const { url, content: html } = await Bun.file(`webpages/${path}`).json();
 
-  const title = extractPageTitle(html);
+  const rewriter = new HTMLRewriter();
 
-  docs.push({ url, title });
+  const titleRef = extractPageTitle(rewriter);
+  const contents = scrapeHtmlContent(rewriter);
 
-  const contents = scrapeHtmlContent(html);
+  rewriter.transform(new Response(html));
+
+  docs.push({ url, title: titleRef[0] });
 
   const tokens = contents.flatMap(word => tokenizer.tokenize(word.toLowerCase()))
 
