@@ -177,4 +177,4 @@ dist
 # Auto generated files
 webpages/
 docs.json
-index.json
+*.index.json

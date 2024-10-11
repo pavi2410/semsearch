@@ -66,4 +66,4 @@ for (const path of files) {
 }
 
 await Bun.write("docs.json", JSON.stringify(docs));
-await Bun.write("index.json", JSON.stringify(tfidf));
+await Bun.write("tfidf.index.json", JSON.stringify(tfidf));

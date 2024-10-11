@@ -2,7 +2,7 @@ import { LevenshteinDistanceSearch, TfIdf, WordTokenizer } from "natural";
 import { styleText } from "node:util";
 import docsList from "./docs.json";
 
-const indexJson = await Bun.file("./index.json").json();
+const indexJson = await Bun.file("./tfidf.index.json").json();
 const tfidf = new TfIdf(indexJson);
 const tokenizer = new WordTokenizer();
 
