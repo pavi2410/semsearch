@@ -1,35 +1,30 @@
 import { TfIdf, TreebankWordTokenizer } from 'natural';
 import { readdir } from "node:fs/promises";
 
-class ContentScraper {
-  contents: string[];
-  i: number;
-  constructor() {
-    this.contents = []
-    this.i = 0
-  }
-  text(text: HTMLRewriterTypes.Text) {
-    if (text.text.trim() === '') {
-      return
-    }
-    if (this.contents[this.i]) {
-      this.contents[this.i] += text.text
-    } else {
-      this.contents[this.i] = text.text
-    }
-    if (text.lastInTextNode) {
-      console.log(this.contents[this.i])
-      this.i++
-    }
-  }
-}
-
 function scrapeHtmlContent(html: string) {
-  const scraper = new ContentScraper();
+  const contents: string[] = [];
+  let i = 0;
+  const rewriter = new HTMLRewriter();
 
-  new HTMLRewriter().on('*', scraper).transform(new Response(html));
+  rewriter.on('*', {
+    text(text) {
+      if (text.text.trim() === '') {
+        return
+      }
+      if (contents[i]) {
+        contents[i] += text.text
+      } else {
+        contents[i] = text.text
+      }
+      if (text.lastInTextNode) {
+        i++
+      }
+    }
+  });
+  
+  rewriter.transform(new Response(html));
 
-  return scraper.contents;
+  return contents;
 }
 
 function extractPageTitle(html: string) {
