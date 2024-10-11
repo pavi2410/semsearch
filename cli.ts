@@ -28,18 +28,27 @@ const sortedResults = Array.from(results.entries()).sort((a, b) => b[1] - a[1]);
 for (const [docIdx, score] of sortedResults.slice(0, 10)) {
   const doc = docsList[docIdx];
 
-  console.log(`${styleText('bold', addHighlights(doc.title, tokens))} (${score.toFixed(2)})
-↳ ${styleText('dim', styleText('underline', doc.url))}\n`);
+  const title = doc.title.trim() === '' ? styleText('italic', 'Untitled page') : styleText('bold', addHighlights(doc.title, tokens));
+
+  const hostname = new URL(doc.url).hostname;
+  const start = doc.url.indexOf(hostname);
+  const end = start + hostname.length;
+  const url = styleText('dim', styleText('underline', highlightSpan(doc.url, start, end, 'italic')));
+
+  const scoreDisplay = styleText('dim', `(${score.toFixed(2)})`);
+
+  console.log(`${title} ${scoreDisplay}\n↳ ${url}\n`);
 }
 
-function highlightSpan(text: string, start: number, end: number) {
-  return text.slice(0, start) + styleText('bgYellow', text.slice(start, end)) + text.slice(end);
+function highlightSpan(text: string, start: number, end: number, format: Parameters<typeof styleText>[0] = 'bgYellow') {
+  return text.slice(0, start) + styleText(format, text.slice(start, end)) + text.slice(end);
 }
 
 type Span = [start: number, end: number];
+
 function addHighlights(text: string, tokens: string[]) {
   const lowercasedText = text.toLowerCase();
-  
+
   const spans: Span[] = [];
   for (const token of tokens) {
     const ld = LevenshteinDistanceSearch(token, lowercasedText);
