@@ -1,34 +1,21 @@
-import { LevenshteinDistanceSearch, TfIdf, TreebankWordTokenizer } from "natural";
+import { LevenshteinDistanceSearch } from "natural";
 import { styleText } from "node:util";
 import docsList from "./docs.json";
-
-const indexJson = await Bun.file("./tfidf.index.json").json();
-const tfidf = new TfIdf(indexJson);
-const tokenizer = new TreebankWordTokenizer();
+import { search } from "./search";
 
 const searchQuery = process.argv.slice(2).join(' ')
 
 console.log("Semsearch CLI\n")
 console.log(`Search results for "${styleText('bold', searchQuery)}"`);
-const tokens = tokenizer.tokenize(searchQuery.toLowerCase());
 
-const results = new Map<number, number>();
+const { queryTokens, queryTime, results } = search(searchQuery);
 
-const start = performance.now();
-tfidf.tfidfs(tokens, (docIdx, score) => {
-  if (score > 0) {
-    results.set(docIdx, score);
-  }
-});
-const end = performance.now();
-console.log(styleText('dim', `Found ${results.size} results in ${(end - start).toFixed(2)}ms\n`));
+console.log(styleText('dim', `Found ${results.length} results in ${queryTime.toFixed(2)}ms\n`));
 
-const sortedResults = Array.from(results.entries()).sort((a, b) => b[1] - a[1]);
-
-for (const [docIdx, score] of sortedResults.slice(0, 10)) {
+for (const [docIdx, score] of results.slice(0, 10)) {
   const doc = docsList[docIdx];
 
-  const title = doc.title.trim() === '' ? styleText('italic', 'Untitled page') : styleText('bold', addHighlights(doc.title, tokens));
+  const title = doc.title.trim() === '' ? styleText('italic', 'Untitled page') : styleText('bold', addHighlights(doc.title, queryTokens));
 
   const hostname = new URL(doc.url).hostname;
   const start = doc.url.indexOf(hostname);

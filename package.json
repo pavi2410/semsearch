@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "search": "bun run cli.ts",
     "crawl": "bun run crawler.ts",
-    "index": "bun run indexer.ts"
+    "index": "bun run indexer.ts",
+    "search": "bun run cli.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
