@@ -1,21 +1,22 @@
-import { LevenshteinDistanceSearch } from "natural";
 import { styleText } from "node:util";
-import docsList from "./docs.json";
+import winkDistance from "wink-distance";
+import nlp from "wink-nlp-utils";
 import { search } from "./search";
+import docsList from "./docs.json";
 
 const searchQuery = process.argv.slice(2).join(' ')
 
 console.log("Semsearch CLI\n")
 console.log(`Search results for "${styleText('bold', searchQuery)}"`);
 
-const { queryTokens, queryTime, results } = search(searchQuery);
+const { queryTime, results } = search(searchQuery);
 
 console.log(styleText('dim', `Found ${results.length} results in ${queryTime.toFixed(2)}ms\n`));
 
 for (const [docIdx, score] of results.slice(0, 10)) {
   const doc = docsList[docIdx];
 
-  const title = doc.title.trim() === '' ? styleText('italic', 'Untitled page') : styleText('bold', addHighlights(doc.title, queryTokens));
+  const title = doc.title.trim() === '' ? styleText('italic', 'Untitled page') : styleText('bold', addHighlights(doc.title, searchQuery));
 
   const hostname = new URL(doc.url).hostname;
   const start = doc.url.indexOf(hostname);
@@ -33,14 +34,18 @@ function highlightSpan(text: string, start: number, end: number, format: Paramet
 
 type Span = [start: number, end: number];
 
-function addHighlights(text: string, tokens: string[]) {
-  const lowercasedText = text.toLowerCase();
+function addHighlights(text: string, searchQuery: string) {
+  const textTokens = nlp.string.tokenize0(text);
+  const queryTokens = nlp.string.tokenize0(searchQuery);
 
   const spans: Span[] = [];
-  for (const token of tokens) {
-    const ld = LevenshteinDistanceSearch(token, lowercasedText);
-    if (ld.distance < token.length / 2) {
-      spans.push([ld.offset, ld.offset + ld.substring.length]);
+  for (const t1 of queryTokens) {
+    for (const t2 of textTokens) {
+      const distance = winkDistance.string.levenshtein(t2, t1);
+      if (distance < t1.length / 2) {
+        const start = text.indexOf(t2);
+        spans.push([start, start + t2.length]);
+      }
     }
   }
 

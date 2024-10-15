@@ -1,33 +1,33 @@
-import { TfIdf, TreebankWordTokenizer } from "natural";
+import bm25 from 'wink-bm25-text-search';
+import nlp from 'wink-nlp-utils';
 
-const indexJson = await Bun.file("./index.json").json();
-const tfidf = new TfIdf(indexJson);
-const tokenizer = new TreebankWordTokenizer();
+const indexJson = await Bun.file("./index.json").text();
+
+const bm25Engine = bm25();
+bm25Engine.importJSON(indexJson);
+
+const pipe = [
+  nlp.string.lowerCase,
+  nlp.string.tokenize0,
+  nlp.tokens.removeWords,
+  nlp.tokens.stem,
+  nlp.tokens.propagateNegations
+];
+
+bm25Engine.definePrepTasks(pipe);
 
 type SearchResult = {
-  queryTokens: string[];
   queryTime: number;
-  results: [docIdx: number, score: number][];
+  results: [docIdx: string, score: number][];
 }
 
 export function search(query: string): SearchResult {
-  const tokens = tokenizer.tokenize(query.toLowerCase());
-
-  const results = new Map<number, number>();
-
   const start = performance.now();
-  tfidf.tfidfs(tokens, (docIdx, score) => {
-    if (score > 0) {
-      results.set(docIdx, score);
-    }
-  });
+  const results = bm25Engine.search(query)
   const end = performance.now();
 
-  const sortedResults = Array.from(results.entries()).sort((a, b) => b[1] - a[1]);
-
   return {
-    queryTokens: tokens,
     queryTime: end - start,
-    results: sortedResults,
+    results,
   }
 }

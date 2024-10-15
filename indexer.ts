@@ -1,5 +1,6 @@
-import { TfIdf, TreebankWordTokenizer } from 'natural';
 import { readdir } from "node:fs/promises";
+import bm25 from 'wink-bm25-text-search';
+import nlp from 'wink-nlp-utils';
 
 function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
@@ -33,12 +34,23 @@ function extractPageTitle(rewriter: HTMLRewriter) {
   return title;
 }
 
-const tokenizer = new TreebankWordTokenizer();
-const tfidf = new TfIdf();
+const bm25Engine = bm25();
+
+bm25Engine.defineConfig({ fldWeights: { title: 1, content: 1 } });
+
+const pipe = [
+  nlp.string.lowerCase,
+  nlp.string.tokenize0,
+  nlp.tokens.removeWords,
+  nlp.tokens.stem,
+  nlp.tokens.propagateNegations
+];
+
+bm25Engine.definePrepTasks(pipe);
 
 const files = await readdir('webpages');
 
-const docs: Array<{ url: string; title: string; }> = [];
+const docs: Record<string, { url: string; title: string; }> = {};
 
 for (const path of files) {
   const { url, content: html } = await Bun.file(`webpages/${path}`).json();
@@ -50,12 +62,19 @@ for (const path of files) {
 
   rewriter.transform(new Response(html));
 
-  docs.push({ url, title: titleRef[0] });
+  const urlHash = String(Bun.hash(url));
+  const title = nlp.string.trim(titleRef[0]);
 
-  const tokens = contents.flatMap(word => tokenizer.tokenize(word.toLowerCase()))
+  docs[urlHash] = { url, title };
 
-  tfidf.addDocument(tokens);
+  bm25Engine.addDoc({
+    url: url,
+    title,
+    content: contents.join(' '),
+  }, urlHash);
 }
 
+bm25Engine.consolidate();
+
 await Bun.write("docs.json", JSON.stringify(docs));
-await Bun.write("index.json", JSON.stringify(tfidf));
+await Bun.write("index.json", bm25Engine.exportJSON());
