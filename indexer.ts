@@ -6,7 +6,7 @@ function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
   let i = 0;
 
-  rewriter.on('*', {
+  rewriter.on('body *', {
     text(text) {
       if (contents[i]) {
         contents[i] += text.text
@@ -25,7 +25,7 @@ function scrapeHtmlContent(rewriter: HTMLRewriter) {
 function extractPageTitle(rewriter: HTMLRewriter) {
   let title: [string] = [''];
 
-  rewriter.on('title', {
+  rewriter.on('head > title', {
     text(text) {
       title[0] += text.text
     }
