@@ -6,7 +6,7 @@ function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
   let i = 0;
 
-  rewriter.on('body *', {
+  rewriter.on('body :not(script):not(style)', {
     text(text) {
       if (contents[i]) {
         contents[i] += text.text
