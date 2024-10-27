@@ -1,5 +1,11 @@
 async function fetchWebPage(url: string): Promise<string> {
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      'Accept': 'text/html',
+      'Accept-Language': 'en',
+      'User-Agent': 'Googlebot',
+    }
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
   }
