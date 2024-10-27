@@ -64,7 +64,7 @@ function extractLinks(html: string, baseUrl: string): string[] {
   rewriter.on('a', {
     element(el) {
       const href = el.getAttribute('href');
-      if (href && !href.startsWith('#')) {
+      if (href && href.startsWith('http') && !href.startsWith('#')) {
         const absoluteUrl = new URL(href, baseUrl).toString();
         links.push(absoluteUrl);
       }
