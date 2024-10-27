@@ -12,8 +12,8 @@ async function fetchWebPage(url: string): Promise<string> {
   return await response.text();
 }
 
-async function crawl(startUrl: string): Promise<void> {
-  const queue: string[] = [startUrl];
+async function crawl(startUrls: string[]): Promise<void> {
+  const queue: string[] = startUrls;
   const visited: Set<string> = new Set();
 
   while (queue.length > 0) {
@@ -77,13 +77,13 @@ function extractLinks(html: string, baseUrl: string): string[] {
 }
 
 
-const urls = [
+const startUrls = [
   'https://en.wikipedia.org',
   'https://news.ycombinator.com',
   'https://www.reddit.com',
+  'https://pavi2410.me',
 ];
 
 console.time('crawl')
-await Promise.allSettled(urls.map(url => crawl(url)))
+await crawl(startUrls)
 console.timeEnd('crawl')
-
