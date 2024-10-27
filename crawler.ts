@@ -7,7 +7,7 @@ async function fetchWebPage(url: string): Promise<string> {
     }
   });
   if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
   }
   return await response.text();
 }
@@ -31,7 +31,7 @@ async function crawl(startUrls: string[]): Promise<void> {
           throw new Error('File too old');
         }
         html = content;
-        console.log(`Skip fetching ${url}`);
+        console.log(`Skip fetching ${url}\n\tLast fetched at ${new Date(lastFetchedAt).toISOString()}`);
       } catch (error) {
         // File does not exist or is stale; so fetch it
         html = await fetchWebPage(url);
@@ -52,7 +52,7 @@ async function crawl(startUrls: string[]): Promise<void> {
         }
       }
     } catch (error) {
-      console.error(`Error crawling ${url}`);
+      console.error(`Error crawling ${url}\n\t${(error as Error).message}`);
     }
   }
 }
