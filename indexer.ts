@@ -67,8 +67,11 @@ bm25Engine.definePrepTasks(pipe);
 
 const files = await readdir('webpages');
 
+console.log(`Found ${files.length} webpages`)
+
 const docs: Record<string, { url: string; title: string; }> = {};
 
+let i = 1;
 for (const path of files) {
   const { url, content: html } = await Bun.file(`webpages/${path}`).json();
 
@@ -89,7 +92,11 @@ for (const path of files) {
     title,
     content: contents.join(' '),
   }, urlHash);
+
+  console.write(`Indexed page ${i++} of ${files.length}\r`)
 }
+
+console.write('\n')
 
 bm25Engine.consolidate();
 
