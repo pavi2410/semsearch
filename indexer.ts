@@ -5,16 +5,33 @@ import nlp from 'wink-nlp-utils';
 function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
   let i = 0;
+  let skip = false;
 
-  rewriter.on('body :not(script):not(style)', {
+  rewriter.on('body *', {
+    element(element) {
+      if (element.tagName === 'style' || element.tagName === 'script') {
+        skip = true;
+      }
+      element.onEndTag((endTag) => {
+        skip = false;
+      })
+    }
+  })
+
+  rewriter.on('body', {
     text(text) {
+      if (skip) return;
+
       if (contents[i]) {
         contents[i] += text.text
       } else {
         contents[i] = text.text
       }
       if (text.lastInTextNode) {
-        i++
+        contents[i] = contents[i].trim()
+        if (contents[i].length > 0) {
+          i++
+        }
       }
     }
   });
@@ -60,7 +77,7 @@ for (const path of files) {
   const titleRef = extractPageTitle(rewriter);
   const contents = scrapeHtmlContent(rewriter);
 
-  rewriter.transform(new Response(html));
+  rewriter.transform(html);
 
   const urlHash = String(Bun.hash(url));
   const title = nlp.string.trim(titleRef[0]);
