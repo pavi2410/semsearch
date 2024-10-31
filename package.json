@@ -8,12 +8,14 @@
     "search": "bun run cli.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/he": "^1.2.3"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "he": "^1.2.0",
     "wink-bm25-text-search": "^3.1.2",
     "wink-distance": "^2.0.2",
     "wink-nlp-utils": "^2.1.0"

@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import bm25 from 'wink-bm25-text-search';
 import nlp from 'wink-nlp-utils';
+import * as he from 'he';
 
 function scrapeHtmlContent(rewriter: HTMLRewriter) {
   const contents: string[] = [];
@@ -28,7 +29,7 @@ function scrapeHtmlContent(rewriter: HTMLRewriter) {
         contents[i] = text.text
       }
       if (text.lastInTextNode) {
-        contents[i] = contents[i].trim()
+        contents[i] = he.decode(contents[i].trim())
         if (contents[i].length > 0) {
           i++
         }
@@ -36,19 +37,19 @@ function scrapeHtmlContent(rewriter: HTMLRewriter) {
     }
   });
 
-  return contents;
+  return () => contents.join(' ');
 }
 
 function extractPageTitle(rewriter: HTMLRewriter) {
-  let title: [string] = [''];
+  let title = '';
 
   rewriter.on('head > title', {
     text(text) {
-      title[0] += text.text
+      title += text.text
     }
   });
 
-  return title;
+  return () => he.decode(title.trim());
 }
 
 const bm25Engine = bm25();
@@ -78,19 +79,20 @@ for (const path of files) {
   const rewriter = new HTMLRewriter();
 
   const titleRef = extractPageTitle(rewriter);
-  const contents = scrapeHtmlContent(rewriter);
+  const contentRef = scrapeHtmlContent(rewriter);
 
   rewriter.transform(html);
 
   const urlHash = String(Bun.hash(url));
-  const title = nlp.string.trim(titleRef[0]);
+  const title = titleRef();
+  const content = contentRef();
 
   docs[urlHash] = { url, title };
 
   bm25Engine.addDoc({
     url: url,
     title,
-    content: contents.join(' '),
+    content,
   }, urlHash);
 
   console.write(`Indexed page ${i++} of ${files.length}\r`)
