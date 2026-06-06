@@ -176,5 +176,6 @@ dist
 
 # Auto generated files
 webpages/
+data/
 docs.json
 index.json
