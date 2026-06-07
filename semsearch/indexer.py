@@ -1,7 +1,9 @@
 import hashlib
 import json
+from collections import Counter
 
 from rank_bm25 import BM25Okapi
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     Progress,
@@ -30,12 +32,17 @@ def _url_hash(url: str) -> str:
 
 
 def main() -> None:
-    files = sorted(WEBPAGES_DIR.glob("*.json"))
-    print(f"Found {len(files)} webpages")
+    files = list(WEBPAGES_DIR.glob("*.json"))
+
+    domains = Counter(fp.stem.rsplit("_", 1)[0] for fp in files)
+    console = Console()
+    console.print(
+        f"Found [bold]{len(files)}[/bold] webpages"
+        f" from [bold]{len(domains)}[/bold] unique domains"
+    )
 
     docs: dict[str, dict[str, str]] = {}
-    corpus_tokens: list[list[str]] = []
-    doc_ids: list[str] = []
+    entries: list[tuple[str, str, list[str]]] = []
 
     progress = Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -60,10 +67,12 @@ def main() -> None:
 
             doc_id = _url_hash(url)
             docs[doc_id] = {"url": url, "title": title}
-            doc_ids.append(doc_id)
-
             tokens = preprocess(f"{title} {text}")
-            corpus_tokens.append(tokens)
+            entries.append((fp.name, doc_id, tokens))
+
+    entries.sort(key=lambda x: x[0])
+    doc_ids = [e[1] for e in entries]
+    corpus_tokens = [e[2] for e in entries]
 
     bm25 = BM25Okapi(corpus_tokens)
 
