@@ -7,6 +7,7 @@ from rich.progress import (
     Progress,
     ProgressColumn,
     TextColumn,
+    TimeElapsedColumn,
     TimeRemainingColumn,
 )
 from rich.text import Text
@@ -40,7 +41,9 @@ def main() -> None:
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TextColumn("{task.completed}/{task.total}"),
+        TextColumn("{task.percentage:>3.0f}%"),
         SpeedColumn(),
+        TimeElapsedColumn(),
         TimeRemainingColumn(),
     )
 
