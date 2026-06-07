@@ -5,8 +5,8 @@ from pathlib import Path
 
 import httpx
 
-from .config import WEBPAGES_DIR
-from .html_utils import extract_links
+from .core.config import WEBPAGES_DIR
+from .core.html_utils import extract_links
 START_URLS = [
     "https://en.wikipedia.org",
     "https://news.ycombinator.com",

@@ -6,7 +6,7 @@ from rich.text import Text
 
 from Levenshtein import distance as lev_distance
 
-from .search import search, get_docs
+from .core.search import search, get_docs
 
 HIGHLIGHT_STYLE = "bold"
 

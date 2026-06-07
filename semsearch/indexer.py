@@ -3,9 +3,9 @@ import json
 
 from rank_bm25 import BM25Okapi
 
-from .config import DOCS_FILE, INDEX_FILE, WEBPAGES_DIR
-from .html_utils import extract_metadata
-from .nlp import preprocess
+from .core.config import DOCS_FILE, INDEX_FILE, WEBPAGES_DIR
+from .core.html_utils import extract_metadata
+from .core.nlp import preprocess
 
 
 def _url_hash(url: str) -> str:
@@ -50,10 +50,11 @@ def main() -> None:
     with open(DOCS_FILE, "w", encoding="utf-8") as f:
         json.dump(docs, f, ensure_ascii=False)
 
+    print(f"Wrote {DOCS_FILE} ({len(docs)} docs)")
+
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         json.dump(params, f, ensure_ascii=False)
 
-    print(f"Wrote {DOCS_FILE} ({len(docs)} docs)")
     print(f"Wrote {INDEX_FILE}")
 
 
