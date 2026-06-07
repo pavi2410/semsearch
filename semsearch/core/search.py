@@ -1,9 +1,8 @@
-import json
 import time
 
 from rank_bm25 import BM25Okapi
 
-from .config import DOCS_FILE, INDEX_FILE
+from .index_store import load_docs, load_index
 from .nlp import preprocess
 
 
@@ -14,16 +13,8 @@ class SearchResult:
 
 
 def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
-    with open(INDEX_FILE, encoding="utf-8") as f:
-        params = json.load(f)
-
-    doc_ids: list[str] = params["doc_ids"]
-    corpus_tokens: list[list[str]] = params["corpus_tokens"]
-    bm25 = BM25Okapi(corpus_tokens, k1=params["k1"], b=params["b"])
-
-    with open(DOCS_FILE, encoding="utf-8") as f:
-        docs: dict[str, dict[str, str]] = json.load(f)
-
+    bm25, doc_ids = load_index()
+    docs = load_docs()
     return bm25, doc_ids, docs
 
 

@@ -3,8 +3,9 @@ import json
 
 from rank_bm25 import BM25Okapi
 
-from .core.config import DOCS_FILE, INDEX_FILE, WEBPAGES_DIR
+from .core.config import WEBPAGES_DIR
 from .core.html_utils import extract_metadata
+from .core.index_store import dump_docs, dump_index
 from .core.nlp import preprocess
 
 
@@ -40,22 +41,9 @@ def main() -> None:
     print()
 
     bm25 = BM25Okapi(corpus_tokens)
-    params = {
-        "doc_ids": doc_ids,
-        "corpus_tokens": corpus_tokens,
-        "k1": bm25.k1,
-        "b": bm25.b,
-    }
 
-    with open(DOCS_FILE, "w", encoding="utf-8") as f:
-        json.dump(docs, f, ensure_ascii=False)
-
-    print(f"Wrote {DOCS_FILE} ({len(docs)} docs)")
-
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
-        json.dump(params, f, ensure_ascii=False)
-
-    print(f"Wrote {INDEX_FILE}")
+    dump_index(bm25, doc_ids)
+    dump_docs(docs)
 
 
 if __name__ == "__main__":
