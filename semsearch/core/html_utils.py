@@ -1,7 +1,10 @@
 import html as html_mod
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup, SoupStrainer
+import warnings
+from bs4 import BeautifulSoup, SoupStrainer, XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 A_TAG = SoupStrainer("a", href=True)
 BODY_TEXT_TAGS = SoupStrainer("body")
