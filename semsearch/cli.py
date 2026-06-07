@@ -1,4 +1,5 @@
-from urllib.parse import urlparse
+from html import unescape as unescape_html
+from urllib.parse import unquote, urlparse
 
 from rich import print as rprint
 from rich.style import Style
@@ -54,6 +55,27 @@ def _add_highlights(text: str, query: str) -> str:
     return str(_highlight_span(text, merged))
 
 
+def _format_display_url(url: str) -> tuple[str, str]:
+    link_url = unescape_html(url)
+    display_url = unquote(link_url)
+    return link_url, display_url
+
+
+def _format_url_display(display_url: str, link_url: str) -> Text:
+    hostname = urlparse(display_url).hostname or ""
+    host_start = display_url.index(hostname)
+    host_end = host_start + len(hostname)
+    url_display = Text(
+        display_url[:host_start]
+    ).append(
+        display_url[host_start:host_end], style=Style(italic=True, bold=True)
+    ).append(
+        display_url[host_end:]
+    )
+    url_display.stylize(Style(link=link_url))
+    return url_display
+
+
 def display_results(query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int) -> None:
     docs = get_docs()
     rprint()
@@ -64,25 +86,15 @@ def display_results(query: str, results: list[tuple[str, float]], query_time_ms:
     for doc_id, score in results[:10]:
         doc = docs.get(doc_id, {})
         title = doc.get("title", "").strip() or "[italic]Untitled page[/italic]"
-        url = doc.get("url", "")
+        link_url, display_url = _format_display_url(doc.get("url", ""))
 
         highlighted_title = Text.from_markup(title)
-
-        hostname = urlparse(url).hostname or ""
-        host_start = url.index(hostname)
-        host_end = host_start + len(hostname)
-        url_display = Text(
-            url[:host_start]
-        ).append(
-            url[host_start:host_end], style=Style(italic=True, underline=True)
-        ).append(
-            url[host_end:]
-        )
-
         score_str = f"({score:.2f})"
 
+        url_display = _format_url_display(display_url, link_url)
+
         rprint(f"{highlighted_title} [dim]{score_str}[/dim]")
-        rprint(f"\u21b3 {url_display}")
+        rprint("\u21b3", url_display)
         rprint()
 
 
