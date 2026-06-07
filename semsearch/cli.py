@@ -5,54 +5,9 @@ from rich import print as rprint
 from rich.style import Style
 from rich.text import Text
 
-from Levenshtein import distance as lev_distance
-
 from .core.search import search, get_docs
 
-HIGHLIGHT_STYLE = "bold"
-
-
-def _highlight_span(text: str, spans: list[tuple[int, int]]) -> str:
-    result = Text()
-    prev = 0
-    for start, end in spans:
-        if start > prev:
-            result.append(text[prev:start])
-        result.append(text[start:end], style=HIGHLIGHT_STYLE)
-        prev = end
-    if prev < len(text):
-        result.append(text[prev:])
-    return result  # type: ignore[return-value]
-
-
-def _add_highlights(text: str, query: str) -> str:
-    query_tokens = query.lower().split()
-    if not query_tokens:
-        return text
-
-    text_lower = text.lower()
-    spans: list[tuple[int, int]] = []
-
-    for qt in query_tokens:
-        for i in range(len(text_lower) - len(qt) + 1):
-            candidate = text_lower[i:i + len(qt)]
-            if lev_distance(candidate, qt) < len(qt) / 2:
-                spans.append((i, i + len(qt)))
-
-    spans.sort(key=lambda x: (x[0], x[1]))
-
-    merged: list[tuple[int, int]] = []
-    for span in spans:
-        if not merged:
-            merged.append(span)
-        else:
-            last = merged[-1]
-            if span[0] <= last[1]:
-                merged[-1] = (last[0], max(last[1], span[1]))
-            else:
-                merged.append(span)
-
-    return str(_highlight_span(text, merged))
+HIGHLIGHT_STYLE = Style(bgcolor="yellow")
 
 
 def _format_display_url(url: str) -> tuple[str, str]:
@@ -83,17 +38,19 @@ def display_results(query: str, results: list[tuple[str, float]], query_time_ms:
     rprint(f"[dim]Found {len(results)} results from {total_docs} pages in {query_time_ms:.3f} ms[/dim]")
     rprint()
 
-    for doc_id, score in results[:10]:
+    for doc_id, score in results[:3]:
         doc = docs.get(doc_id, {})
-        title = doc.get("title", "").strip() or "[italic]Untitled page[/italic]"
+        title = doc.get("title", "").strip() or "Untitled page"
         link_url, display_url = _format_display_url(doc.get("url", ""))
 
-        highlighted_title = Text.from_markup(title)
-        score_str = f"({score:.2f})"
+        highlighted_title = Text(title)
+        highlighted_title.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
+        score_str = f"({score:.4f})"
 
         url_display = _format_url_display(display_url, link_url)
+        url_display.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
 
-        rprint(f"{highlighted_title} [dim]{score_str}[/dim]")
+        rprint(highlighted_title, f"[dim]{score_str}[/dim]")
         rprint("\u21b3", url_display)
         rprint()
 
