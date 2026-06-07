@@ -7,8 +7,8 @@ from .nlp import preprocess
 
 
 class SearchResult:
-    def __init__(self, query_time: float, results: list[tuple[str, float]], total_docs: int):
-        self.query_time = query_time
+    def __init__(self, query_time_ms: float, results: list[tuple[str, float]], total_docs: int):
+        self.query_time_ms = query_time_ms
         self.results = results
         self.total_docs = total_docs
 
@@ -40,16 +40,16 @@ def get_docs() -> dict[str, dict[str, str]]:
 
 def search(query: str) -> SearchResult:
     _ensure_index()
-    start = time.perf_counter()
+    start = time.perf_counter_ns()
     query_tokens = preprocess(query)
     scores = _bm25.get_scores(query_tokens)  # type: ignore[union-attr]
-    end = time.perf_counter()
+    end = time.perf_counter_ns()
 
     results = [(did, s) for did, s in zip(_doc_ids, scores) if s > 0]
     results.sort(key=lambda x: x[1], reverse=True)
 
     return SearchResult(
-        query_time=(end - start) * 1000,
+        query_time_ms=(end - start) / 1_000_000,
         results=results,
         total_docs=len(_doc_ids),
     )

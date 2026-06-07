@@ -54,11 +54,11 @@ def _add_highlights(text: str, query: str) -> str:
     return str(_highlight_span(text, merged))
 
 
-def display_results(query: str, results: list[tuple[str, float]], query_time: float, total_docs: int) -> None:
+def display_results(query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int) -> None:
     docs = get_docs()
     rprint()
     rprint(f"Search results for [bold]{query}[/bold]")
-    rprint(f"[dim]Found {len(results)} results from {total_docs} pages in {query_time:.3f} ms[/dim]")
+    rprint(f"[dim]Found {len(results)} results from {total_docs} pages in {query_time_ms:.3f} ms[/dim]")
     rprint()
 
     for doc_id, score in results[:10]:
@@ -94,4 +94,4 @@ def main() -> None:
         return
 
     result = search(query)
-    display_results(query, result.results, result.query_time, result.total_docs)
+    display_results(query, result.results, result.query_time_ms, result.total_docs)
