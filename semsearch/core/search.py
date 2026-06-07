@@ -45,12 +45,11 @@ def search(query: str) -> SearchResult:
     scores = _bm25.get_scores(query_tokens)  # type: ignore[union-attr]
     end = time.perf_counter()
 
-    paired = list(zip(_doc_ids, scores))
-    paired.sort(key=lambda x: x[1], reverse=True)
-    filtered = [(did, s) for did, s in paired if s > 0]
+    results = [(did, s) for did, s in zip(_doc_ids, scores) if s > 0]
+    results.sort(key=lambda x: x[1], reverse=True)
 
     return SearchResult(
         query_time=(end - start) * 1000,
-        results=filtered,
+        results=results,
         total_docs=len(_doc_ids),
     )
