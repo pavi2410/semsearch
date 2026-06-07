@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup, SoupStrainer
 
 A_TAG = SoupStrainer("a", href=True)
 BODY_TEXT_TAGS = SoupStrainer("body")
-TITLE_TAG = SoupStrainer("head", recursive=True)
+TITLE_TAG = SoupStrainer("head")
 
 
 def extract_links(html: str, base_url: str) -> list[str]:
