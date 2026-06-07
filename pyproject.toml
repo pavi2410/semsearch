@@ -15,7 +15,12 @@ dependencies = [
 ]
 
 [project.scripts]
-semsearch = "semsearch.__main__:main"
+crawl = "semsearch.crawler:main"
+index = "semsearch.indexer:main"
+search = "semsearch.cli:main"
+
+[tool.uv]
+package = true
 
 [tool.setuptools.packages.find]
 include = ["semsearch*"]
