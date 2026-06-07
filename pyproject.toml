@@ -1,0 +1,23 @@
+[project]
+name = "semsearch"
+version = "0.1.0"
+description = "Semantic search engine CLI using BM25"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
+    "lxml>=6.1.1",
+    "python-levenshtein>=0.27.3",
+    "rank-bm25>=0.2.2",
+    "rich>=15.0.0",
+    "snowballstemmer>=3.1.1",
+]
+
+[project.scripts]
+semsearch = "semsearch.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["semsearch*"]
+
+
