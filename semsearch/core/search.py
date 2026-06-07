@@ -7,9 +7,10 @@ from .nlp import preprocess
 
 
 class SearchResult:
-    def __init__(self, query_time: float, results: list[tuple[str, float]]):
+    def __init__(self, query_time: float, results: list[tuple[str, float]], total_docs: int):
         self.query_time = query_time
         self.results = results
+        self.total_docs = total_docs
 
 
 def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
@@ -51,4 +52,5 @@ def search(query: str) -> SearchResult:
     return SearchResult(
         query_time=(end - start) * 1000,
         results=filtered,
+        total_docs=len(_doc_ids),
     )
