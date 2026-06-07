@@ -174,8 +174,18 @@ dist
 # Finder (MacOS) folder config
 .DS_Store
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+dist/
+*.pkl
+
 # Auto generated files
 webpages/
 data/
 docs.json
 index.json
+index_state.json
