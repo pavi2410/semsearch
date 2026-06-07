@@ -5,14 +5,11 @@ from pathlib import Path
 
 import httpx
 
+from .config import WEBPAGES_DIR
 from .html_utils import extract_links
-
-WEBPAGES_DIR = Path("webpages")
 START_URLS = [
     "https://en.wikipedia.org",
     "https://news.ycombinator.com",
-    "https://www.reddit.com",
-    "https://pavi2410.me",
 ]
 HTTP_HEADERS = {
     "Accept": "text/html",
@@ -27,6 +24,7 @@ def _url_hash(url: str) -> str:
 
 def _file_path(url: str) -> Path:
     from urllib.parse import urlparse
+
     hostname = urlparse(url).hostname or "unknown"
     return WEBPAGES_DIR / f"{hostname}_{_url_hash(url)}.json"
 
@@ -58,11 +56,15 @@ def _crawl(client: httpx.Client, url: str, visited: set[str]) -> None:
 
     WEBPAGES_DIR.mkdir(exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
-        json.dump({
-            "url": url,
-            "lastFetchedAt": int(time.time() * 1000),
-            "content": html,
-        }, f, ensure_ascii=False)
+        json.dump(
+            {
+                "url": url,
+                "lastFetchedAt": int(time.time() * 1000),
+                "content": html,
+            },
+            f,
+            ensure_ascii=False,
+        )
     print(f"Saved {url} → {filepath.name}")
 
     visited.add(url)

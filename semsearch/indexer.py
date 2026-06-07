@@ -1,15 +1,11 @@
 import hashlib
 import json
-from pathlib import Path
 
 from rank_bm25 import BM25Okapi
 
+from .config import DOCS_FILE, INDEX_FILE, WEBPAGES_DIR
 from .html_utils import extract_metadata
 from .nlp import preprocess
-
-WEBPAGES_DIR = Path("webpages")
-DOCS_FILE = Path("docs.json")
-INDEX_FILE = Path("index_state.json")
 
 
 def _url_hash(url: str) -> str:

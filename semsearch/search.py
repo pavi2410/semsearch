@@ -1,13 +1,10 @@
 import json
 import time
-from pathlib import Path
 
 from rank_bm25 import BM25Okapi
 
+from .config import DOCS_FILE, INDEX_FILE
 from .nlp import preprocess
-
-DOCS_FILE = Path("docs.json")
-INDEX_FILE = Path("index_state.json")
 
 
 class SearchResult:
