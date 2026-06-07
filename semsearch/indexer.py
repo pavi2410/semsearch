@@ -4,27 +4,12 @@ from collections import Counter
 
 from rank_bm25 import BM25Okapi
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    ProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
-from rich.text import Text
 
+from .core.tui_util import make_determinate_progress
 from .core.config import WEBPAGES_DIR
 from .core.html_utils import extract_metadata
 from .core.index_store import dump_docs, dump_index
 from .core.nlp import preprocess
-
-
-class SpeedColumn(ProgressColumn):
-    def render(self, task):
-        if task.speed is None:
-            return Text("? doc/s")
-        return Text(f"{task.speed:.1f} doc/s")
 
 
 def _url_hash(url: str) -> str:
@@ -44,15 +29,7 @@ def main() -> None:
     docs: dict[str, dict[str, str]] = {}
     entries: list[tuple[str, str, list[str]]] = []
 
-    progress = Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        TextColumn("{task.percentage:>3.0f}%"),
-        SpeedColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-    )
+    progress = make_determinate_progress()
 
     with progress:
         task = progress.add_task("Indexing", total=len(files))

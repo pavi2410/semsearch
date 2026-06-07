@@ -7,6 +7,8 @@ import httpx
 
 from .core.config import WEBPAGES_DIR
 from .core.html_utils import extract_links
+from .core.tui_util import make_indeterminate_progress
+
 START_URLS = [
     "https://en.wikipedia.org",
     "https://news.ycombinator.com",
@@ -29,7 +31,13 @@ def _file_path(url: str) -> Path:
     return WEBPAGES_DIR / f"{hostname}_{_url_hash(url)}.json"
 
 
-def _crawl(client: httpx.Client, url: str, visited: set[str]) -> None:
+def _crawl(
+    client: httpx.Client,
+    url: str,
+    visited: set[str],
+    progress: Progress,
+    task_id: int,
+) -> None:
     if url in visited:
         return
 
@@ -40,18 +48,18 @@ def _crawl(client: httpx.Client, url: str, visited: set[str]) -> None:
             data = json.load(f)
         last_fetched = data.get("lastFetchedAt", 0)
         if time.time() * 1000 - last_fetched < 86400000:
-            print(f"Skip fetching {url}")
+            progress.console.print(f"  Skip fetching {url}")
             visited.add(url)
             return
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError, json.JSONDecodeError:
         pass
 
     try:
-        resp = client.get(url, headers=HTTP_HEADERS, follow_redirects=True, timeout=30)
+        resp = client.get(url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5)
         resp.raise_for_status()
         html = resp.text
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        progress.console.print(f"  [red]Error[/red] fetching {url}: {e}")
         return
 
     WEBPAGES_DIR.mkdir(exist_ok=True)
@@ -65,23 +73,35 @@ def _crawl(client: httpx.Client, url: str, visited: set[str]) -> None:
             f,
             ensure_ascii=False,
         )
-    print(f"Saved {url} → {filepath.name}")
+    progress.console.print(f"  Saved {url} → {filepath.name}")
 
     visited.add(url)
+    progress.update(task_id, advance=1, description=f"Crawling {url[:80]}...")
 
     for link in extract_links(html, url):
         if link not in visited:
             visited.add(link)
-            _crawl(client, link, visited)
+            _crawl(client, link, visited, progress, task_id)
 
 
 def main() -> None:
-    print("Crawl starting...")
     visited: set[str] = set()
-    with httpx.Client() as client:
-        for url in START_URLS:
-            _crawl(client, url, visited)
-    print(f"Crawl complete. Visited {len(visited)} pages.")
+
+    progress = make_indeterminate_progress(
+        count_text="{task.completed} pages", unit="pg/s"
+    )
+
+    with progress:
+        task_id = progress.add_task("Crawling...", total=None)
+        with httpx.Client() as client:
+            for url in START_URLS:
+                if url not in visited:
+                    visited.add(url)
+                    _crawl(client, url, visited, progress, task_id)
+        progress.update(
+            task_id,
+            description=f"Crawling complete — {len(visited)} pages visited",
+        )
 
 
 if __name__ == "__main__":
