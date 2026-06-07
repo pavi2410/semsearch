@@ -79,9 +79,7 @@ def _crawl(
     progress.update(task_id, advance=1, description=f"Crawling {url[:80]}...")
 
     for link in extract_links(html, url):
-        if link not in visited:
-            visited.add(link)
-            _crawl(client, link, visited, progress, task_id)
+        _crawl(client, link, visited, progress, task_id)
 
 
 def main() -> None:
@@ -95,9 +93,7 @@ def main() -> None:
         task_id = progress.add_task("Crawling...", total=None)
         with httpx.Client() as client:
             for url in START_URLS:
-                if url not in visited:
-                    visited.add(url)
-                    _crawl(client, url, visited, progress, task_id)
+                _crawl(client, url, visited, progress, task_id)
         progress.update(
             task_id,
             description=f"Crawling complete — {len(visited)} pages visited",
