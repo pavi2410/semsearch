@@ -7,7 +7,7 @@ from rich.progress import Progress
 
 from .core.html_utils import extract_links
 from .core.tui_util import make_indeterminate_progress
-from .storage import read_page_meta, save_page
+from .storage import read_content, read_page_meta, save_page
 
 START_URLS = [
     "https://en.wikipedia.org",
@@ -34,7 +34,8 @@ def _fetch_and_save(
             parsed = datetime.fromisoformat(last_fetched)
             if time.time() - parsed.timestamp() < 86400:
                 progress.console.print(f"  Skip fetching {url}")
-                return []
+                html = read_content(meta["contentHash"])
+                return extract_links(html, url)
         except ValueError:
             pass
 
