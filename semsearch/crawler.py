@@ -9,7 +9,7 @@ from .core.html_utils import extract_links
 from .core.tui_util import make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
 
-START_URLS = [
+SEED_URLS = [
     "https://en.wikipedia.org",
     "https://news.ycombinator.com",
 ]
@@ -54,7 +54,7 @@ def _fetch_and_save(
 
 def main() -> None:
     visited: set[str] = set()
-    queue: deque[str] = deque(START_URLS)
+    queue: deque[str] = deque(SEED_URLS)
 
     progress = make_indeterminate_progress(
         count_text="{task.completed} pages", unit="pg/s"
