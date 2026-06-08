@@ -1,28 +1,21 @@
-import hashlib
-import json
 from collections import Counter
 
 from rank_bm25 import BM25Okapi
 from rich.console import Console
 
-from .core.tui_util import make_determinate_progress
-from .core.config import WEBPAGES_DIR
 from .core.html_utils import extract_metadata
 from .core.index_store import dump_docs, dump_index
 from .core.nlp import preprocess
-
-
-def _url_hash(url: str) -> str:
-    return hashlib.sha256(url.encode()).hexdigest()[:16]
+from .core.tui_util import make_determinate_progress
+from .storage import iter_page_metas, read_content, url_hash
 
 
 def main() -> None:
-    files = list(WEBPAGES_DIR.glob("*.json"))
-
-    domains = Counter(fp.stem.rsplit("_", 1)[0] for fp in files)
+    metas = list(iter_page_metas())
+    domains = Counter(meta["url"].split("/")[2] for meta in metas)
     console = Console()
     console.print(
-        f"Found [bold]{len(files)}[/bold] webpages"
+        f"Found [bold]{len(metas)}[/bold] webpages"
         f" from [bold]{len(domains)}[/bold] unique domains"
     )
 
@@ -32,20 +25,19 @@ def main() -> None:
     progress = make_determinate_progress()
 
     with progress:
-        task = progress.add_task("Indexing", total=len(files))
-        for fp in files:
+        task = progress.add_task("Indexing", total=len(metas))
+        for meta in metas:
             progress.update(task, advance=1)
-            with open(fp, encoding="utf-8") as f:
-                data = json.load(f)
+            url: str = meta["url"]
+            content_hash: str = meta["contentHash"]
 
-            url: str = data["url"]
-            html: str = data["content"]
+            html = read_content(content_hash)
             title, text = extract_metadata(html)
 
-            doc_id = _url_hash(url)
+            doc_id = url_hash(url)
             docs[doc_id] = {"url": url, "title": title}
             tokens = preprocess(f"{title} {text}")
-            entries.append((fp.name, doc_id, tokens))
+            entries.append((meta["url"], doc_id, tokens))
 
     entries.sort(key=lambda x: x[0])
     doc_ids = [e[1] for e in entries]

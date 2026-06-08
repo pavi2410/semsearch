@@ -18,6 +18,7 @@ dependencies = [
 crawl = "semsearch.crawler:main"
 index = "semsearch.indexer:main"
 search = "semsearch.cli:main"
+migrate = "semsearch.migrate:main"
 
 [tool.uv]
 package = true

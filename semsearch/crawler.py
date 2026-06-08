@@ -1,13 +1,12 @@
-import hashlib
-import json
 import time
-from pathlib import Path
+from datetime import datetime, timezone
 
 import httpx
+from rich.progress import Progress
 
-from .core.config import WEBPAGES_DIR
 from .core.html_utils import extract_links
 from .core.tui_util import make_indeterminate_progress
+from .storage import read_page_meta, save_page
 
 START_URLS = [
     "https://en.wikipedia.org",
@@ -20,15 +19,8 @@ HTTP_HEADERS = {
 }
 
 
-def _url_hash(url: str) -> str:
-    return hashlib.sha256(url.encode()).hexdigest()[:16]
-
-
-def _file_path(url: str) -> Path:
-    from urllib.parse import urlparse
-
-    hostname = urlparse(url).hostname or "unknown"
-    return WEBPAGES_DIR / f"{hostname}_{_url_hash(url)}.json"
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _crawl(
@@ -41,18 +33,17 @@ def _crawl(
     if url in visited:
         return
 
-    filepath = _file_path(url)
-
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            data = json.load(f)
-        last_fetched = data.get("lastFetchedAt", 0)
-        if time.time() * 1000 - last_fetched < 86400000:
-            progress.console.print(f"  Skip fetching {url}")
-            visited.add(url)
-            return
-    except FileNotFoundError, json.JSONDecodeError:
-        pass
+    meta = read_page_meta(url)
+    if meta is not None:
+        last_fetched = meta.get("lastFetchedAt", "")
+        try:
+            parsed = datetime.fromisoformat(last_fetched)
+            if time.time() - parsed.timestamp() < 86400:
+                progress.console.print(f"  Skip fetching {url}")
+                visited.add(url)
+                return
+        except ValueError:
+            pass
 
     try:
         resp = client.get(url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5)
@@ -62,18 +53,8 @@ def _crawl(
         progress.console.print(f"  [red]Error[/red] fetching {url}: {e}")
         return
 
-    WEBPAGES_DIR.mkdir(exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "url": url,
-                "lastFetchedAt": int(time.time() * 1000),
-                "content": html,
-            },
-            f,
-            ensure_ascii=False,
-        )
-    progress.console.print(f"  Saved {url} → {filepath.name}")
+    save_page(url, html, _now())
+    progress.console.print(f"  Saved {url}")
 
     visited.add(url)
     progress.update(task_id, advance=1, description=f"Crawling {url[:80]}...")
