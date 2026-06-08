@@ -42,8 +42,12 @@ def _fetch_and_save(
     task_id: int,
     domain_sems: dict[str, threading.Semaphore],
     domain_sems_lock: threading.Lock,
+    shutdown_event: threading.Event,
 ) -> list[str] | None:
     client = _get_client()
+
+    if shutdown_event.is_set():
+        return None
 
     meta = read_page_meta(url)
     if meta is not None:
@@ -63,7 +67,13 @@ def _fetch_and_save(
             domain_sems[domain] = threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
         sem = domain_sems[domain]
 
-    with sem:
+    while not sem.acquire(timeout=0.5):
+        if shutdown_event.is_set():
+            return None
+
+    try:
+        if shutdown_event.is_set():
+            return None
         try:
             resp = client.get(url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5)
             resp.raise_for_status()
@@ -72,9 +82,11 @@ def _fetch_and_save(
             progress.print(f"  [red]Error[/red] fetching {url}: {e}")
             return None
 
-    save_page(url, html, _now())
-    progress.print(f"  Saved {url}")
-    return extract_links(html, url)
+        save_page(url, html, _now())
+        progress.print(f"  Saved {url}")
+        return extract_links(html, url)
+    finally:
+        sem.release()
 
 
 def main() -> None:
@@ -82,6 +94,7 @@ def main() -> None:
     visited_lock = threading.Lock()
     domain_sems: dict[str, threading.Semaphore] = {}
     domain_sems_lock = threading.Lock()
+    shutdown_event = threading.Event()
 
     progress = make_indeterminate_progress(
         count_text="{task.completed} pages", unit="pg/s"
@@ -90,17 +103,18 @@ def main() -> None:
     with progress:
         task_id = progress.add_task("Crawling...", total=None)
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            pending: set[Future] = set()
+        executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        pending: set[Future] = set()
 
-            for url in SEED_URLS:
-                visited.add(url)
-                pending.add(
-                    executor.submit(
-                        _fetch_and_save, url, progress, task_id, domain_sems, domain_sems_lock
-                    )
+        for url in SEED_URLS:
+            visited.add(url)
+            pending.add(
+                executor.submit(
+                    _fetch_and_save, url, progress, task_id, domain_sems, domain_sems_lock, shutdown_event
                 )
+            )
 
+        try:
             while pending:
                 done, pending = wait(pending, return_when=FIRST_COMPLETED)
                 for future in done:
@@ -119,9 +133,17 @@ def main() -> None:
                                 visited.add(link)
                                 pending.add(
                                     executor.submit(
-                                        _fetch_and_save, link, progress, task_id, domain_sems, domain_sems_lock
+                                        _fetch_and_save, link, progress, task_id, domain_sems, domain_sems_lock, shutdown_event
                                     )
                                 )
+        except KeyboardInterrupt:
+            progress.print("[yellow]Shutting down...[/yellow]")
+            shutdown_event.set()
+            for f in pending:
+                f.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        executor.shutdown()
 
         progress.update(
             task_id,

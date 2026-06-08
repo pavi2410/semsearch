@@ -33,20 +33,28 @@ def main() -> None:
 
     docs: dict[str, dict[str, str]] = {}
     entries: list[tuple[str, str, list[str]]] = []
+    interrupted = False
 
     progress = make_determinate_progress()
 
     with progress:
         task = progress.add_task("Indexing", total=len(metas))
 
+        pool = ProcessPoolExecutor(max_workers=os.cpu_count())
         try:
-            with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
-                futures = [pool.submit(_process_page, meta) for meta in metas]
+            futures = [pool.submit(_process_page, meta) for meta in metas]
+            try:
                 for future in as_completed(futures):
                     url, doc_id, title, tokens = future.result()
                     docs[doc_id] = {"url": url, "title": title}
                     entries.append((url, doc_id, tokens))
                     progress.advance(task)
+            except KeyboardInterrupt:
+                console.print("[yellow]Shutting down...[/yellow]")
+                interrupted = True
+                for f in futures:
+                    f.cancel()
+                pool.shutdown(wait=False, cancel_futures=True)
         except BrokenProcessPool:
             console.print("[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]")
             for meta in metas:
@@ -54,6 +62,12 @@ def main() -> None:
                 docs[doc_id] = {"url": url, "title": title}
                 entries.append((url, doc_id, tokens))
                 progress.advance(task)
+        else:
+            pool.shutdown()
+
+    if interrupted:
+        console.print(f"Interrupted — [bold]{len(entries)}[/bold] pages indexed so far")
+        return
 
     entries.sort(key=lambda x: x[0])
     doc_ids = [e[1] for e in entries]
