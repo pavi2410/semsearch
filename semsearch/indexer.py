@@ -1,6 +1,7 @@
 import os
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 
 from rank_bm25 import BM25Okapi
 from rich.console import Console
@@ -38,10 +39,18 @@ def main() -> None:
     with progress:
         task = progress.add_task("Indexing", total=len(metas))
 
-        with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
-            futures = [pool.submit(_process_page, meta) for meta in metas]
-            for future in as_completed(futures):
-                url, doc_id, title, tokens = future.result()
+        try:
+            with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
+                futures = [pool.submit(_process_page, meta) for meta in metas]
+                for future in as_completed(futures):
+                    url, doc_id, title, tokens = future.result()
+                    docs[doc_id] = {"url": url, "title": title}
+                    entries.append((url, doc_id, tokens))
+                    progress.advance(task)
+        except BrokenProcessPool:
+            console.print("[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]")
+            for meta in metas:
+                url, doc_id, title, tokens = _process_page(meta)
                 docs[doc_id] = {"url": url, "title": title}
                 entries.append((url, doc_id, tokens))
                 progress.advance(task)
