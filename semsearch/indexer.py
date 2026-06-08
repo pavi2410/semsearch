@@ -1,4 +1,6 @@
+import os
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from rank_bm25 import BM25Okapi
 from rich.console import Console
@@ -8,6 +10,15 @@ from .core.index_store import dump_docs, dump_index
 from .core.nlp import preprocess
 from .core.tui_util import make_determinate_progress
 from .storage import iter_page_metas, read_content, url_hash
+
+
+def _process_page(meta: dict) -> tuple[str, str, str, list[str]]:
+    url = meta["url"]
+    html = read_content(meta["contentHash"])
+    title, text = extract_metadata(html)
+    doc_id = url_hash(url)
+    tokens = preprocess(f"{title} {text}")
+    return (meta["url"], doc_id, title, tokens)
 
 
 def main() -> None:
@@ -26,18 +37,14 @@ def main() -> None:
 
     with progress:
         task = progress.add_task("Indexing", total=len(metas))
-        for meta in metas:
-            progress.update(task, advance=1)
-            url: str = meta["url"]
-            content_hash: str = meta["contentHash"]
 
-            html = read_content(content_hash)
-            title, text = extract_metadata(html)
-
-            doc_id = url_hash(url)
-            docs[doc_id] = {"url": url, "title": title}
-            tokens = preprocess(f"{title} {text}")
-            entries.append((meta["url"], doc_id, tokens))
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
+            futures = [pool.submit(_process_page, meta) for meta in metas]
+            for future in as_completed(futures):
+                url, doc_id, title, tokens = future.result()
+                docs[doc_id] = {"url": url, "title": title}
+                entries.append((url, doc_id, tokens))
+                progress.advance(task)
 
     entries.sort(key=lambda x: x[0])
     doc_ids = [e[1] for e in entries]
