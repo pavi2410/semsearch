@@ -1,4 +1,5 @@
 import time
+from collections import deque
 from datetime import datetime, timezone
 
 import httpx
@@ -23,16 +24,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _crawl(
-    client: httpx.Client,
-    url: str,
-    visited: set[str],
-    progress: Progress,
-    task_id: int,
-) -> None:
-    if url in visited:
-        return
-
+def _fetch_and_save(
+    client: httpx.Client, url: str, progress: Progress, task_id: int
+) -> list[str] | None:
     meta = read_page_meta(url)
     if meta is not None:
         last_fetched = meta.get("lastFetchedAt", "")
@@ -40,8 +34,7 @@ def _crawl(
             parsed = datetime.fromisoformat(last_fetched)
             if time.time() - parsed.timestamp() < 86400:
                 progress.console.print(f"  Skip fetching {url}")
-                visited.add(url)
-                return
+                return []
         except ValueError:
             pass
 
@@ -51,20 +44,16 @@ def _crawl(
         html = resp.text
     except Exception as e:
         progress.console.print(f"  [red]Error[/red] fetching {url}: {e}")
-        return
+        return None
 
     save_page(url, html, _now())
     progress.console.print(f"  Saved {url}")
-
-    visited.add(url)
-    progress.update(task_id, advance=1, description=f"Crawling {url[:80]}...")
-
-    for link in extract_links(html, url):
-        _crawl(client, link, visited, progress, task_id)
+    return extract_links(html, url)
 
 
 def main() -> None:
     visited: set[str] = set()
+    queue: deque[str] = deque(START_URLS)
 
     progress = make_indeterminate_progress(
         count_text="{task.completed} pages", unit="pg/s"
@@ -73,8 +62,22 @@ def main() -> None:
     with progress:
         task_id = progress.add_task("Crawling...", total=None)
         with httpx.Client() as client:
-            for url in START_URLS:
-                _crawl(client, url, visited, progress, task_id)
+            while queue:
+                url = queue.popleft()
+                if url in visited:
+                    continue
+
+                links = _fetch_and_save(client, url, progress, task_id)
+                if links is None:
+                    continue
+
+                visited.add(url)
+                progress.update(task_id, advance=1, description=f"Crawling {url[:80]}...")
+
+                for link in links:
+                    if link not in visited:
+                        queue.append(link)
+
         progress.update(
             task_id,
             description=f"Crawling complete — {len(visited)} pages visited",
