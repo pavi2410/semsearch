@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
+from rich.live import Live
 from rich.progress import Progress
 
 from .core.html_utils import extract_links
 from .core.thread_utils import ThreadSafeDict, ThreadSafeSet
-from .core.tui_util import make_indeterminate_progress
+from .core.tui_util import CrawlStats, make_crawler_display, make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
 from .storage.page import normalize_url
 
@@ -47,70 +48,89 @@ def _fetch_and_save(
     domain_last_fetch: ThreadSafeDict[str, float],
     shutdown_event: threading.Event,
     visited: "ThreadSafeSet[str]",
+    stats: CrawlStats,
 ) -> list[str] | None:
     client = _get_client()
-
-    if shutdown_event.is_set():
-        return None
-
-    meta = read_page_meta(url)
-    if meta is not None:
-        last_fetched = meta.get("lastFetchedAt", "")
-        try:
-            parsed = datetime.fromisoformat(last_fetched)
-            if time.time() - parsed.timestamp() < 86400:
-                progress.print(f"  Skip fetching {url}")
-                html = read_content(meta["contentHash"])
-                return extract_links(html, url)
-        except ValueError:
-            pass
-
-    domain = urlparse(url).hostname or url
-    sem = domain_sems.get_or_insert(
-        domain, lambda: threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
-    )
-
-    while not sem.acquire(timeout=0.5):
-        if shutdown_event.is_set():
-            return None
-
+    stats.inc("in_flight")
     try:
         if shutdown_event.is_set():
             return None
 
-        last = domain_last_fetch.get(domain)
-        if last is not None:
-            wait = RATE_LIMIT_DELAY - (time.time() - last)
-            if wait > 0:
-                progress.print(f"  [dim]Rate limiting {domain} for {wait:.2f}s[/dim]")
-                time.sleep(wait)
+        meta = read_page_meta(url)
+        if meta is not None:
+            last_fetched = meta.get("lastFetchedAt", "")
+            try:
+                parsed = datetime.fromisoformat(last_fetched)
+                if time.time() - parsed.timestamp() < 86400:
+                    progress.print(f"  Skip fetching {url}")
+                    stats.inc("skipped")
+                    html = read_content(meta["contentHash"])
+                    return extract_links(html, url)
+            except ValueError:
+                pass
+
+        domain = urlparse(url).hostname or url
+        sem = domain_sems.get_or_insert(
+            domain, lambda: threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
+        )
+
+        while not sem.acquire(timeout=0.5):
+            if shutdown_event.is_set():
+                return None
 
         try:
-            resp = client.get(
-                url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
-            )
-            resp.raise_for_status()
-            html = resp.text
-        except Exception as e:
-            progress.print(f"  [red]Error[/red] fetching {url}: {e}")
-            return None
+            if shutdown_event.is_set():
+                return None
+
+            last = domain_last_fetch.get(domain)
+            if last is not None:
+                wait = RATE_LIMIT_DELAY - (time.time() - last)
+                if wait > 0:
+                    progress.print(
+                        f"  [dim]Rate limiting {domain} for {wait:.2f}s[/dim]"
+                    )
+                    stats.inc("rate_limited")
+                    time.sleep(wait)
+
+            stats.inc("requests")
+            try:
+                resp = client.get(
+                    url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
+                )
+                resp.raise_for_status()
+                html = resp.text
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
+                progress.print(f"  [red]HTTP {code}[/red] {url}")
+                return None
+            except Exception as e:
+                stats.inc("error_net")
+                progress.print(f"  [red]Error[/red] fetching {url}: {e}")
+                return None
+            finally:
+                domain_last_fetch.set(domain, time.time())
+
+            stats.inc("req_2xx")
+            stats.inc("req_3xx", by=len(resp.history))
+            stats.inc("saved")
+            now = _now()
+            save_page(url, html, now)
+
+            final_url = normalize_url(str(resp.url))
+            if final_url != url:
+                if visited.add_if_absent(final_url):
+                    stats.inc("visited")
+                save_page(final_url, html, now)
+                progress.print(f"  Saved {url} -> {final_url}")
+            else:
+                progress.print(f"  Saved {url}")
+
+            return extract_links(html, url)
         finally:
-            domain_last_fetch.set(domain, time.time())
-
-        now = _now()
-        save_page(url, html, now)
-
-        final_url = normalize_url(str(resp.url))
-        if final_url != url:
-            visited.add_if_absent(final_url)
-            save_page(final_url, html, now)
-            progress.print(f"  Saved {url} -> {final_url}")
-        else:
-            progress.print(f"  Saved {url}")
-
-        return extract_links(html, url)
+            sem.release()
     finally:
-        sem.release()
+        stats.inc("in_flight", by=-1)
 
 
 def main() -> None:
@@ -118,12 +138,14 @@ def main() -> None:
     domain_sems: ThreadSafeDict[str, threading.Semaphore] = ThreadSafeDict()
     domain_last_fetch: ThreadSafeDict[str, float] = ThreadSafeDict()
     shutdown_event = threading.Event()
+    stats = CrawlStats()
 
     progress = make_indeterminate_progress(
         count_text="{task.completed} pages", unit="pg/s"
     )
+    display = make_crawler_display(progress, stats)
 
-    with progress:
+    with Live(display, refresh_per_second=4):
         task_id = progress.add_task("Crawling...", total=None)
 
         executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
@@ -132,6 +154,7 @@ def main() -> None:
         for url in SEED_URLS:
             norm_url = normalize_url(url)
             visited.add(norm_url)
+            stats.inc("visited")
             pending.add(
                 executor.submit(
                     _fetch_and_save,
@@ -142,6 +165,7 @@ def main() -> None:
                     domain_last_fetch,
                     shutdown_event,
                     visited,
+                    stats,
                 )
             )
 
@@ -161,6 +185,7 @@ def main() -> None:
                     for link in links:
                         norm_link = normalize_url(link)
                         if visited.add_if_absent(norm_link):
+                            stats.inc("visited")
                             pending.add(
                                 executor.submit(
                                     _fetch_and_save,
@@ -171,6 +196,7 @@ def main() -> None:
                                     domain_last_fetch,
                                     shutdown_event,
                                     visited,
+                                    stats,
                                 )
                             )
         except KeyboardInterrupt:
@@ -184,7 +210,7 @@ def main() -> None:
 
         progress.update(
             task_id,
-            description=f"Crawling complete — {len(visited)} pages visited",
+            description="Crawling complete",
         )
 
 
