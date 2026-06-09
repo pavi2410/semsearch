@@ -26,6 +26,17 @@ HTTP_HEADERS = {
 MAX_WORKERS = 10
 MAX_CONCURRENT_PER_DOMAIN = 2
 RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
+REFETCH_INTERVAL = 86400  # seconds before a cached page is considered stale (24h)
+
+
+def is_stale(meta: dict) -> bool:
+    """Return True if the page should be re-fetched based on REFETCH_INTERVAL."""
+    try:
+        parsed = datetime.fromisoformat(meta.get("lastFetchedAt", ""))
+        return time.time() - parsed.timestamp() >= REFETCH_INTERVAL
+    except ValueError:
+        return True
+
 
 _thread_local = threading.local()
 
@@ -57,17 +68,11 @@ def _fetch_and_save(
             return None
 
         meta = read_page_meta(url)
-        if meta is not None:
-            last_fetched = meta.get("lastFetchedAt", "")
-            try:
-                parsed = datetime.fromisoformat(last_fetched)
-                if time.time() - parsed.timestamp() < 86400:
-                    progress.print(f"  Skip fetching {url}")
-                    stats.inc("skipped")
-                    html = read_content(meta["contentHash"])
-                    return extract_links(html, url)
-            except ValueError:
-                pass
+        if meta is not None and not is_stale(meta):
+            progress.print(f"  Skip fetching {url}")
+            stats.inc("skipped")
+            html = read_content(meta["contentHash"])
+            return extract_links(html, url)
 
         domain = urlparse(url).hostname or url
         sem = domain_sems.get_or_insert(
