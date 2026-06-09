@@ -8,7 +8,7 @@ import httpx
 from rich.progress import Progress
 
 from .core.html_utils import extract_links
-from .core.thread_utils import ThreadSafeSet
+from .core.thread_utils import ThreadSafeDict, ThreadSafeSet
 from .core.tui_util import make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
 
@@ -41,8 +41,7 @@ def _fetch_and_save(
     url: str,
     progress: Progress,
     task_id: int,
-    domain_sems: dict[str, threading.Semaphore],
-    domain_sems_lock: threading.Lock,
+    domain_sems: ThreadSafeDict[str, threading.Semaphore],
     shutdown_event: threading.Event,
 ) -> list[str] | None:
     client = _get_client()
@@ -63,10 +62,9 @@ def _fetch_and_save(
             pass
 
     domain = urlparse(url).hostname or url
-    with domain_sems_lock:
-        if domain not in domain_sems:
-            domain_sems[domain] = threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
-        sem = domain_sems[domain]
+    sem = domain_sems.get_or_insert(
+        domain, lambda: threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
+    )
 
     while not sem.acquire(timeout=0.5):
         if shutdown_event.is_set():
@@ -94,8 +92,7 @@ def _fetch_and_save(
 
 def main() -> None:
     visited: ThreadSafeSet[str] = ThreadSafeSet()
-    domain_sems: dict[str, threading.Semaphore] = {}
-    domain_sems_lock = threading.Lock()
+    domain_sems: ThreadSafeDict[str, threading.Semaphore] = ThreadSafeDict()
     shutdown_event = threading.Event()
 
     progress = make_indeterminate_progress(
@@ -117,7 +114,6 @@ def main() -> None:
                     progress,
                     task_id,
                     domain_sems,
-                    domain_sems_lock,
                     shutdown_event,
                 )
             )
@@ -144,7 +140,6 @@ def main() -> None:
                                     progress,
                                     task_id,
                                     domain_sems,
-                                    domain_sems_lock,
                                     shutdown_event,
                                 )
                             )

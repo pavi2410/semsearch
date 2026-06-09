@@ -1,7 +1,9 @@
 import threading
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 T = TypeVar("T")
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 class ThreadSafeSet(Generic[T]):
@@ -30,3 +32,26 @@ class ThreadSafeSet(Generic[T]):
     def __len__(self) -> int:
         with self._lock:
             return len(self._set)
+
+
+class ThreadSafeDict(Generic[K, V]):
+    """A thread-safe dict wrapper."""
+
+    def __init__(self) -> None:
+        self._dict: dict[K, V] = {}
+        self._lock = threading.Lock()
+
+    def get_or_insert(self, key: K, default_factory: Callable[[], V]) -> V:
+        """Atomically return the value for key, inserting default_factory() if absent."""
+        with self._lock:
+            if key not in self._dict:
+                self._dict[key] = default_factory()
+            return self._dict[key]
+
+    def __contains__(self, key: object) -> bool:
+        with self._lock:
+            return key in self._dict
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._dict)
