@@ -11,6 +11,7 @@ from .core.html_utils import extract_links
 from .core.thread_utils import ThreadSafeDict, ThreadSafeSet
 from .core.tui_util import make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
+from .storage.page import normalize_url
 
 SEED_URLS = [
     "https://en.wikipedia.org",
@@ -43,6 +44,7 @@ def _fetch_and_save(
     task_id: int,
     domain_sems: ThreadSafeDict[str, threading.Semaphore],
     shutdown_event: threading.Event,
+    visited: "ThreadSafeSet[str]",
 ) -> list[str] | None:
     client = _get_client()
 
@@ -83,8 +85,17 @@ def _fetch_and_save(
             progress.print(f"  [red]Error[/red] fetching {url}: {e}")
             return None
 
-        save_page(url, html, _now())
-        progress.print(f"  Saved {url}")
+        now = _now()
+        save_page(url, html, now)
+
+        final_url = normalize_url(str(resp.url))
+        if final_url != url:
+            visited.add_if_absent(final_url)
+            save_page(final_url, html, now)
+            progress.print(f"  Saved {url} -> {final_url}")
+        else:
+            progress.print(f"  Saved {url}")
+
         return extract_links(html, url)
     finally:
         sem.release()
@@ -106,15 +117,17 @@ def main() -> None:
         pending: set[Future] = set()
 
         for url in SEED_URLS:
-            visited.add(url)
+            norm_url = normalize_url(url)
+            visited.add(norm_url)
             pending.add(
                 executor.submit(
                     _fetch_and_save,
-                    url,
+                    norm_url,
                     progress,
                     task_id,
                     domain_sems,
                     shutdown_event,
+                    visited,
                 )
             )
 
@@ -132,15 +145,17 @@ def main() -> None:
                     progress.update(task_id, advance=1)
 
                     for link in links:
-                        if visited.add_if_absent(link):
+                        norm_link = normalize_url(link)
+                        if visited.add_if_absent(norm_link):
                             pending.add(
                                 executor.submit(
                                     _fetch_and_save,
-                                    link,
+                                    norm_link,
                                     progress,
                                     task_id,
                                     domain_sems,
                                     shutdown_event,
+                                    visited,
                                 )
                             )
         except KeyboardInterrupt:
