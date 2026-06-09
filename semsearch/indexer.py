@@ -32,7 +32,7 @@ def main() -> None:
     )
 
     docs: dict[str, dict[str, str]] = {}
-    entries: list[tuple[str, str, list[str]]] = []
+    entries: dict[str, tuple[str, list[str]]] = {}
     interrupted = False
 
     progress = make_determinate_progress()
@@ -47,7 +47,7 @@ def main() -> None:
                 for future in as_completed(futures):
                     url, doc_id, title, tokens = future.result()
                     docs[doc_id] = {"url": url, "title": title}
-                    entries.append((url, doc_id, tokens))
+                    entries[doc_id] = (url, tokens)
                     progress.advance(task)
             except KeyboardInterrupt:
                 console.print("[yellow]Shutting down...[/yellow]")
@@ -60,7 +60,7 @@ def main() -> None:
             for meta in metas:
                 url, doc_id, title, tokens = _process_page(meta)
                 docs[doc_id] = {"url": url, "title": title}
-                entries.append((url, doc_id, tokens))
+                entries[doc_id] = (url, tokens)
                 progress.advance(task)
         else:
             pool.shutdown()
@@ -69,9 +69,8 @@ def main() -> None:
         console.print(f"Interrupted — [bold]{len(entries)}[/bold] pages indexed so far")
         return
 
-    entries.sort(key=lambda x: x[0])
-    doc_ids = [e[1] for e in entries]
-    corpus_tokens = [e[2] for e in entries]
+    doc_ids = list(entries.keys())
+    corpus_tokens = [tokens for _, tokens in entries.values()]
 
     bm25 = BM25Okapi(corpus_tokens)
 
