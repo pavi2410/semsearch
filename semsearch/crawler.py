@@ -10,6 +10,7 @@ from rich.live import Live
 from rich.progress import Progress
 
 from .core.html_utils import extract_links
+from .core.robots import USER_AGENT, RobotsCache
 from .core.thread_utils import ThreadSafeDict, ThreadSafeSet
 from .core.tui_util import CrawlStats, make_crawler_display, make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
@@ -22,7 +23,7 @@ SEED_URLS = [
 HTTP_HEADERS = {
     "Accept": "text/html",
     "Accept-Language": "en",
-    "User-Agent": "Googlebot",
+    "User-Agent": USER_AGENT,
 }
 MAX_WORKERS = 10
 MAX_CONCURRENT_PER_DOMAIN = 2
@@ -30,11 +31,13 @@ RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
 REFETCH_INTERVAL = 86400  # seconds before a cached page is considered stale (24h)
 
 
-def get_rate_limit_wait(last_fetch: float | None) -> float:
+def get_rate_limit_wait(
+    last_fetch: float | None, delay: float = RATE_LIMIT_DELAY
+) -> float:
     """Return how many seconds to wait before the next request to a domain, or 0."""
     if last_fetch is None:
         return 0.0
-    return max(0.0, RATE_LIMIT_DELAY - (time.time() - last_fetch))
+    return max(0.0, delay - (time.time() - last_fetch))
 
 
 def is_stale(meta: dict) -> bool:
@@ -52,6 +55,7 @@ class CrawlerContext:
     task_id: int
     domain_sems: ThreadSafeDict[str, threading.Semaphore]
     domain_last_fetch: ThreadSafeDict[str, float]
+    robots_cache: RobotsCache
     shutdown_event: threading.Event
     visited: ThreadSafeSet[str]
     stats: CrawlStats
@@ -77,6 +81,11 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
         if ctx.shutdown_event.is_set():
             return None
 
+        if not ctx.robots_cache.can_fetch(url):
+            ctx.progress.print(f"  [yellow]Disallowed by robots.txt[/yellow] {url}")
+            ctx.stats.inc("robots_blocked")
+            return None
+
         meta = read_page_meta(url)
         if meta is not None and not is_stale(meta):
             ctx.progress.print(f"  Skip fetching {url}")
@@ -97,7 +106,10 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             if ctx.shutdown_event.is_set():
                 return None
 
-            rate_limit_wait = get_rate_limit_wait(ctx.domain_last_fetch.get(domain))
+            effective_delay = ctx.robots_cache.crawl_delay(url)
+            rate_limit_wait = get_rate_limit_wait(
+                ctx.domain_last_fetch.get(domain), effective_delay
+            )
             if rate_limit_wait > 0:
                 ctx.progress.print(
                     f"  [dim]Rate limiting {domain} for {rate_limit_wait:.2f}s[/dim]"
@@ -156,11 +168,13 @@ def main() -> None:
     with Live(display, refresh_per_second=4):
         task_id = progress.add_task("Crawling...", total=None)
 
+        robots_client = httpx.Client()
         ctx = CrawlerContext(
             progress=progress,
             task_id=task_id,
             domain_sems=ThreadSafeDict(),
             domain_last_fetch=ThreadSafeDict(),
+            robots_cache=RobotsCache(robots_client, default_delay=RATE_LIMIT_DELAY),
             shutdown_event=threading.Event(),
             visited=ThreadSafeSet(),
             stats=stats,

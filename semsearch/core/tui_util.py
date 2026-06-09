@@ -54,6 +54,7 @@ class CrawlStats:
     # crawler engine
     in_flight: int = 0
     rate_limited: int = 0
+    robots_blocked: int = 0
     # network / http
     requests: int = 0
     req_2xx: int = 0
@@ -71,7 +72,6 @@ class CrawlStats:
         with self._lock:
             setattr(self, name, getattr(self, name) + by)
 
-
     def __rich__(self) -> Group:
         def row(pairs: list[tuple[str, str, str]]) -> Text:
             t = Text()
@@ -84,6 +84,7 @@ class CrawlStats:
             [
                 ("in-flight", f"{self.in_flight:,}", "bold white"),
                 ("rate-limited", f"{self.rate_limited:,}", "yellow"),
+                ("robots-blocked", f"{self.robots_blocked:,}", "bold yellow"),
             ]
         )
         network_row = row(
