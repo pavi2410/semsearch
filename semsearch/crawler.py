@@ -29,6 +29,13 @@ RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
 REFETCH_INTERVAL = 86400  # seconds before a cached page is considered stale (24h)
 
 
+def get_rate_limit_wait(last_fetch: float | None) -> float:
+    """Return how many seconds to wait before the next request to a domain, or 0."""
+    if last_fetch is None:
+        return 0.0
+    return max(0.0, RATE_LIMIT_DELAY - (time.time() - last_fetch))
+
+
 def is_stale(meta: dict) -> bool:
     """Return True if the page should be re-fetched based on REFETCH_INTERVAL."""
     try:
@@ -87,15 +94,13 @@ def _fetch_and_save(
             if shutdown_event.is_set():
                 return None
 
-            last = domain_last_fetch.get(domain)
-            if last is not None:
-                wait = RATE_LIMIT_DELAY - (time.time() - last)
-                if wait > 0:
-                    progress.print(
-                        f"  [dim]Rate limiting {domain} for {wait:.2f}s[/dim]"
-                    )
-                    stats.inc("rate_limited")
-                    time.sleep(wait)
+            rate_limit_wait = get_rate_limit_wait(domain_last_fetch.get(domain))
+            if rate_limit_wait > 0:
+                progress.print(
+                    f"  [dim]Rate limiting {domain} for {rate_limit_wait:.2f}s[/dim]"
+                )
+                stats.inc("rate_limited")
+                time.sleep(rate_limit_wait)
 
             stats.inc("requests")
             try:
