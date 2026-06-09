@@ -1,6 +1,7 @@
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -45,6 +46,17 @@ def is_stale(meta: dict) -> bool:
         return True
 
 
+@dataclass
+class CrawlerContext:
+    progress: Progress
+    task_id: int
+    domain_sems: ThreadSafeDict[str, threading.Semaphore]
+    domain_last_fetch: ThreadSafeDict[str, float]
+    shutdown_event: threading.Event
+    visited: ThreadSafeSet[str]
+    stats: CrawlStats
+
+
 _thread_local = threading.local()
 
 
@@ -58,51 +70,42 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _fetch_and_save(
-    url: str,
-    progress: Progress,
-    task_id: int,
-    domain_sems: ThreadSafeDict[str, threading.Semaphore],
-    domain_last_fetch: ThreadSafeDict[str, float],
-    shutdown_event: threading.Event,
-    visited: "ThreadSafeSet[str]",
-    stats: CrawlStats,
-) -> list[str] | None:
+def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
     client = _get_client()
-    stats.inc("in_flight")
+    ctx.stats.inc("in_flight")
     try:
-        if shutdown_event.is_set():
+        if ctx.shutdown_event.is_set():
             return None
 
         meta = read_page_meta(url)
         if meta is not None and not is_stale(meta):
-            progress.print(f"  Skip fetching {url}")
-            stats.inc("skipped")
+            ctx.progress.print(f"  Skip fetching {url}")
+            ctx.stats.inc("skipped")
             html = read_content(meta["contentHash"])
             return extract_links(html, url)
 
         domain = urlparse(url).hostname or url
-        sem = domain_sems.get_or_insert(
+        sem = ctx.domain_sems.get_or_insert(
             domain, lambda: threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
         )
 
         while not sem.acquire(timeout=0.5):
-            if shutdown_event.is_set():
+            if ctx.shutdown_event.is_set():
                 return None
 
         try:
-            if shutdown_event.is_set():
+            if ctx.shutdown_event.is_set():
                 return None
 
-            rate_limit_wait = get_rate_limit_wait(domain_last_fetch.get(domain))
+            rate_limit_wait = get_rate_limit_wait(ctx.domain_last_fetch.get(domain))
             if rate_limit_wait > 0:
-                progress.print(
+                ctx.progress.print(
                     f"  [dim]Rate limiting {domain} for {rate_limit_wait:.2f}s[/dim]"
                 )
-                stats.inc("rate_limited")
+                ctx.stats.inc("rate_limited")
                 time.sleep(rate_limit_wait)
 
-            stats.inc("requests")
+            ctx.stats.inc("requests")
             try:
                 resp = client.get(
                     url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
@@ -111,73 +114,69 @@ def _fetch_and_save(
                 html = resp.text
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code
-                stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
-                progress.print(f"  [red]HTTP {code}[/red] {url}")
+                ctx.stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
+                ctx.progress.print(f"  [red]HTTP {code}[/red] {url}")
                 return None
             except Exception as e:
-                stats.inc("error_net")
-                progress.print(f"  [red]Error[/red] fetching {url}: {e}")
+                ctx.stats.inc("error_net")
+                ctx.progress.print(f"  [red]Error[/red] fetching {url}: {e}")
                 return None
             finally:
-                domain_last_fetch.set(domain, time.time())
+                ctx.domain_last_fetch.set(domain, time.time())
 
-            stats.inc("req_2xx")
-            stats.inc("req_3xx", by=len(resp.history))
-            stats.inc("saved")
+            ctx.stats.inc("req_2xx")
+            ctx.stats.inc("req_3xx", by=len(resp.history))
+            ctx.stats.inc("saved")
             now = _now()
             save_page(url, html, now)
 
             final_url = normalize_url(str(resp.url))
             if final_url != url:
-                if visited.add_if_absent(final_url):
-                    stats.inc("visited")
+                if ctx.visited.add_if_absent(final_url):
+                    ctx.stats.inc("visited")
                 save_page(final_url, html, now)
-                progress.print(f"  Saved {url} -> {final_url}")
+                ctx.progress.print(f"  Saved {url} -> {final_url}")
             else:
-                progress.print(f"  Saved {url}")
+                ctx.progress.print(f"  Saved {url}")
 
             return extract_links(html, url)
         finally:
             sem.release()
     finally:
-        stats.inc("in_flight", by=-1)
+        ctx.stats.inc("in_flight", by=-1)
 
 
 def main() -> None:
-    visited: ThreadSafeSet[str] = ThreadSafeSet()
-    domain_sems: ThreadSafeDict[str, threading.Semaphore] = ThreadSafeDict()
-    domain_last_fetch: ThreadSafeDict[str, float] = ThreadSafeDict()
-    shutdown_event = threading.Event()
-    stats = CrawlStats()
-
     progress = make_indeterminate_progress(
         count_text="{task.completed} pages", unit="pg/s"
     )
+    stats = CrawlStats()
     display = make_crawler_display(progress, stats)
 
     with Live(display, refresh_per_second=4):
         task_id = progress.add_task("Crawling...", total=None)
 
+        ctx = CrawlerContext(
+            progress=progress,
+            task_id=task_id,
+            domain_sems=ThreadSafeDict(),
+            domain_last_fetch=ThreadSafeDict(),
+            shutdown_event=threading.Event(),
+            visited=ThreadSafeSet(),
+            stats=stats,
+        )
+
         executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
         pending: set[Future] = set()
 
+        def submit_url(url: str) -> None:
+            pending.add(executor.submit(_fetch_and_save, url, ctx))
+
         for url in SEED_URLS:
             norm_url = normalize_url(url)
-            visited.add(norm_url)
-            stats.inc("visited")
-            pending.add(
-                executor.submit(
-                    _fetch_and_save,
-                    norm_url,
-                    progress,
-                    task_id,
-                    domain_sems,
-                    domain_last_fetch,
-                    shutdown_event,
-                    visited,
-                    stats,
-                )
-            )
+            if ctx.visited.add_if_absent(norm_url):
+                ctx.stats.inc("visited")
+                submit_url(norm_url)
 
         try:
             while pending:
@@ -194,24 +193,12 @@ def main() -> None:
 
                     for link in links:
                         norm_link = normalize_url(link)
-                        if visited.add_if_absent(norm_link):
-                            stats.inc("visited")
-                            pending.add(
-                                executor.submit(
-                                    _fetch_and_save,
-                                    norm_link,
-                                    progress,
-                                    task_id,
-                                    domain_sems,
-                                    domain_last_fetch,
-                                    shutdown_event,
-                                    visited,
-                                    stats,
-                                )
-                            )
+                        if ctx.visited.add_if_absent(norm_link):
+                            ctx.stats.inc("visited")
+                            submit_url(norm_link)
         except KeyboardInterrupt:
             progress.print("[yellow]Shutting down...[/yellow]")
-            shutdown_event.set()
+            ctx.shutdown_event.set()
             for f in pending:
                 f.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
