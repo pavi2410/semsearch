@@ -24,6 +24,7 @@ HTTP_HEADERS = {
 }
 MAX_WORKERS = 10
 MAX_CONCURRENT_PER_DOMAIN = 2
+RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
 
 _thread_local = threading.local()
 
@@ -43,6 +44,7 @@ def _fetch_and_save(
     progress: Progress,
     task_id: int,
     domain_sems: ThreadSafeDict[str, threading.Semaphore],
+    domain_last_fetch: ThreadSafeDict[str, float],
     shutdown_event: threading.Event,
     visited: "ThreadSafeSet[str]",
 ) -> list[str] | None:
@@ -75,6 +77,14 @@ def _fetch_and_save(
     try:
         if shutdown_event.is_set():
             return None
+
+        last = domain_last_fetch.get(domain)
+        if last is not None:
+            wait = RATE_LIMIT_DELAY - (time.time() - last)
+            if wait > 0:
+                progress.print(f"  [dim]Rate limiting {domain} for {wait:.2f}s[/dim]")
+                time.sleep(wait)
+
         try:
             resp = client.get(
                 url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
@@ -84,6 +94,8 @@ def _fetch_and_save(
         except Exception as e:
             progress.print(f"  [red]Error[/red] fetching {url}: {e}")
             return None
+        finally:
+            domain_last_fetch.set(domain, time.time())
 
         now = _now()
         save_page(url, html, now)
@@ -104,6 +116,7 @@ def _fetch_and_save(
 def main() -> None:
     visited: ThreadSafeSet[str] = ThreadSafeSet()
     domain_sems: ThreadSafeDict[str, threading.Semaphore] = ThreadSafeDict()
+    domain_last_fetch: ThreadSafeDict[str, float] = ThreadSafeDict()
     shutdown_event = threading.Event()
 
     progress = make_indeterminate_progress(
@@ -126,6 +139,7 @@ def main() -> None:
                     progress,
                     task_id,
                     domain_sems,
+                    domain_last_fetch,
                     shutdown_event,
                     visited,
                 )
@@ -154,6 +168,7 @@ def main() -> None:
                                     progress,
                                     task_id,
                                     domain_sems,
+                                    domain_last_fetch,
                                     shutdown_event,
                                     visited,
                                 )

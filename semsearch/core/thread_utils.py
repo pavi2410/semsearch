@@ -52,6 +52,14 @@ class ThreadSafeDict(Generic[K, V]):
         with self._lock:
             return key in self._dict
 
+    def get(self, key: K, default: V | None = None) -> V | None:
+        with self._lock:
+            return self._dict.get(key, default)
+
+    def set(self, key: K, value: V) -> None:
+        with self._lock:
+            self._dict[key] = value
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._dict)
