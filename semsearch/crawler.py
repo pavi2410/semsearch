@@ -8,6 +8,7 @@ import httpx
 from rich.progress import Progress
 
 from .core.html_utils import extract_links
+from .core.thread_utils import ThreadSafeSet
 from .core.tui_util import make_indeterminate_progress
 from .storage import read_content, read_page_meta, save_page
 
@@ -75,7 +76,9 @@ def _fetch_and_save(
         if shutdown_event.is_set():
             return None
         try:
-            resp = client.get(url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5)
+            resp = client.get(
+                url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
+            )
             resp.raise_for_status()
             html = resp.text
         except Exception as e:
@@ -90,8 +93,7 @@ def _fetch_and_save(
 
 
 def main() -> None:
-    visited: set[str] = set()
-    visited_lock = threading.Lock()
+    visited: ThreadSafeSet[str] = ThreadSafeSet()
     domain_sems: dict[str, threading.Semaphore] = {}
     domain_sems_lock = threading.Lock()
     shutdown_event = threading.Event()
@@ -110,7 +112,13 @@ def main() -> None:
             visited.add(url)
             pending.add(
                 executor.submit(
-                    _fetch_and_save, url, progress, task_id, domain_sems, domain_sems_lock, shutdown_event
+                    _fetch_and_save,
+                    url,
+                    progress,
+                    task_id,
+                    domain_sems,
+                    domain_sems_lock,
+                    shutdown_event,
                 )
             )
 
@@ -128,14 +136,18 @@ def main() -> None:
                     progress.update(task_id, advance=1)
 
                     for link in links:
-                        with visited_lock:
-                            if link not in visited:
-                                visited.add(link)
-                                pending.add(
-                                    executor.submit(
-                                        _fetch_and_save, link, progress, task_id, domain_sems, domain_sems_lock, shutdown_event
-                                    )
+                        if visited.add_if_absent(link):
+                            pending.add(
+                                executor.submit(
+                                    _fetch_and_save,
+                                    link,
+                                    progress,
+                                    task_id,
+                                    domain_sems,
+                                    domain_sems_lock,
+                                    shutdown_event,
                                 )
+                            )
         except KeyboardInterrupt:
             progress.print("[yellow]Shutting down...[/yellow]")
             shutdown_event.set()
