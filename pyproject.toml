@@ -25,3 +25,8 @@ package = true
 
 [tool.setuptools.packages.find]
 include = ["semsearch*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.16",
+]
