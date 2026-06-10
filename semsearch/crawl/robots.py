@@ -38,9 +38,10 @@ class RobotsCache:
                 )
                 if resp.status_code == 200:
                     parser.parse(resp.text.splitlines())
-                # Any non-200 (404, 403, etc.) → treat as allow all
+                else:
+                    parser.allow_all = True  # non-200 → treat as allow all
             except Exception:
-                pass  # Network error → allow all
+                parser.allow_all = True  # network error → allow all
 
             self._parsers[domain] = parser
 
