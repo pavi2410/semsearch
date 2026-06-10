@@ -66,6 +66,7 @@ class CrawlStats:
     visited: int = 0
     saved: int = 0
     skipped: int = 0
+    sitemap_urls: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def inc(self, name: str, by: int = 1) -> None:
@@ -102,6 +103,7 @@ class CrawlStats:
                 ("discovered", f"{self.visited:,}", "bold white"),
                 ("saved", f"{self.saved:,}", "bold green"),
                 ("skipped", f"{self.skipped:,}", "cyan"),
+                ("sitemap-urls", f"{self.sitemap_urls:,}", "cyan"),
             ]
         )
         return Group(engine_row, network_row, data_row)

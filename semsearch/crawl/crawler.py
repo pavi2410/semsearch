@@ -17,6 +17,7 @@ from ..storage import read_content, read_page_meta, save_page
 from ..storage.page import normalize_url
 from .html_utils import extract_links
 from .robots import USER_AGENT, RobotsCache
+from .sitemap import SitemapLoader
 
 SEED_URLS = [
     "https://en.wikipedia.org",
@@ -64,11 +65,37 @@ class CrawlerContext:
     robots_cache: RobotsCache = field(init=False)
     shutdown_event: asyncio.Event = field(default_factory=asyncio.Event)
     visited: set[str] = field(default_factory=set)
+    seen_domains: set[str] = field(default_factory=set)
     stats: CrawlStats = field(default_factory=CrawlStats)
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    sitemap_loader: SitemapLoader = field(init=False)
 
     def __post_init__(self) -> None:
         self.robots_cache = RobotsCache(self.client, default_delay=RATE_LIMIT_DELAY)
+        self.sitemap_loader = SitemapLoader(self.client)
+
+
+async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
+    """Add a URL to the queue if not visited. On new domains, bulk-enqueue sitemap URLs."""
+    if url in ctx.visited:
+        return
+    ctx.visited.add(url)
+    ctx.stats.inc("visited")
+    await ctx.queue.put(url)
+
+    domain = urlparse(url).hostname
+    if domain and domain not in ctx.seen_domains:
+        ctx.seen_domains.add(domain)
+        sitemap_urls = await ctx.robots_cache.sitemaps(domain)
+        page_urls = await ctx.sitemap_loader.load(domain, sitemap_urls)
+        ctx.progress.print(f"  [cyan]Sitemap[/cyan] {domain}: {len(page_urls)} URLs")
+        ctx.stats.inc("sitemap_urls", by=len(page_urls))
+        for page_url in page_urls:
+            norm = normalize_url(page_url)
+            if norm not in ctx.visited:
+                ctx.visited.add(norm)
+                ctx.stats.inc("visited")
+                await ctx.queue.put(norm)
 
 
 async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
@@ -159,11 +186,7 @@ async def _worker(ctx: CrawlerContext) -> None:
             if links:
                 ctx.progress.update(ctx.task_id, advance=1)
                 for link in links:
-                    norm_link = normalize_url(link)
-                    if norm_link not in ctx.visited:
-                        ctx.visited.add(norm_link)
-                        ctx.stats.inc("visited")
-                        await ctx.queue.put(norm_link)
+                    await _enqueue_url(normalize_url(link), ctx)
         finally:
             ctx.queue.task_done()
 
@@ -200,10 +223,7 @@ def main() -> None:
                 )
 
                 for url in SEED_URLS:
-                    norm_url = normalize_url(url)
-                    ctx.visited.add(norm_url)
-                    ctx.stats.inc("visited")
-                    await ctx.queue.put(norm_url)
+                    await _enqueue_url(normalize_url(url), ctx)
 
                 try:
                     await _crawl(ctx)

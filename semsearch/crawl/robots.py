@@ -53,6 +53,11 @@ class RobotsCache:
         parser = await self._get_parser(domain)
         return parser.can_fetch(USER_AGENT, url)
 
+    async def sitemaps(self, domain: str) -> list[str]:
+        """Returns sitemap URLs declared in robots.txt for this domain."""
+        parser = await self._get_parser(domain)
+        return list(parser.site_maps() or [])
+
     async def crawl_delay(self, url: str) -> float:
         """Returns the effective crawl delay for this URL's domain.
 
