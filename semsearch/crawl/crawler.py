@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
+from rich import print as rprint
 from rich.live import Live
 from rich.progress import Progress, TaskID
 
@@ -86,6 +87,7 @@ async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
     domain = urlparse(url).hostname
     if domain and domain not in ctx.seen_domains:
         ctx.seen_domains.add(domain)
+        ctx.stats.inc("domains_discovered")
         sitemap_urls = await ctx.robots_cache.sitemaps(domain)
         page_urls = await ctx.sitemap_loader.load(domain, sitemap_urls)
         ctx.progress.print(f"  [cyan]Sitemap[/cyan] {domain}: {len(page_urls)} URLs")
@@ -116,6 +118,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             html = read_content(meta["contentHash"])
             return extract_links(html, url)
 
+        is_new_page = meta is None
         domain = urlparse(url).hostname or url
         if domain not in ctx.domain_sems:
             ctx.domain_sems[domain] = asyncio.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
@@ -157,7 +160,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
 
             ctx.stats.inc("req_2xx")
             ctx.stats.inc("req_3xx", by=len(resp.history))
-            ctx.stats.inc("saved")
+            ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
             now = _now()
             save_page(url, html, now)
 
@@ -232,6 +235,9 @@ def main() -> None:
                     ctx.shutdown_event.set()
 
                 progress.update(task_id, description="Crawling complete")
+
+        rprint()
+        rprint(stats.summary())
 
     try:
         asyncio.run(run())

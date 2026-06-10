@@ -64,9 +64,11 @@ class CrawlStats:
     error_net: int = 0
     # crawl data
     visited: int = 0
-    saved: int = 0
+    pages_new: int = 0
+    pages_refreshed: int = 0
     skipped: int = 0
     sitemap_urls: int = 0
+    domains_discovered: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def inc(self, name: str, by: int = 1) -> None:
@@ -101,12 +103,33 @@ class CrawlStats:
         data_row = row(
             [
                 ("discovered", f"{self.visited:,}", "bold white"),
-                ("saved", f"{self.saved:,}", "bold green"),
+                ("new", f"{self.pages_new:,}", "bold green"),
+                ("refreshed", f"{self.pages_refreshed:,}", "green"),
                 ("skipped", f"{self.skipped:,}", "cyan"),
                 ("sitemap-urls", f"{self.sitemap_urls:,}", "cyan"),
+                ("domains", f"{self.domains_discovered:,}", "bold white"),
             ]
         )
         return Group(engine_row, network_row, data_row)
+
+    def summary(self) -> str:
+        lines = [
+            "[bold]Crawl summary[/bold]",
+            f"  Pages new          {self.pages_new:>8,}",
+            f"  Pages refreshed    {self.pages_refreshed:>8,}",
+            f"  Pages skipped      {self.skipped:>8,}",
+            f"  Domains discovered {self.domains_discovered:>8,}",
+            f"  Sitemap URLs       {self.sitemap_urls:>8,}",
+            "",
+            f"  Requests           {self.requests:>8,}",
+            f"  2xx                {self.req_2xx:>8,}",
+            f"  3xx                {self.req_3xx:>8,}",
+            f"  4xx                {self.req_4xx:>8,}",
+            f"  5xx                {self.req_5xx:>8,}",
+            f"  Network errors     {self.error_net:>8,}",
+            f"  Robots blocked     {self.robots_blocked:>8,}",
+        ]
+        return "\n".join(lines)
 
 
 def make_crawler_display(progress: Progress, stats: CrawlStats) -> Group:
