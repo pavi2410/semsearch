@@ -5,7 +5,7 @@ from rich import print as rprint
 from rich.style import Style
 from rich.text import Text
 
-from .core.search import search, get_docs
+from .search.search import get_docs, search
 
 HIGHLIGHT_STYLE = Style(bgcolor="yellow")
 
@@ -20,22 +20,24 @@ def _format_url_display(display_url: str, link_url: str) -> Text:
     hostname = urlparse(display_url).hostname or ""
     host_start = display_url.index(hostname)
     host_end = host_start + len(hostname)
-    url_display = Text(
-        display_url[:host_start]
-    ).append(
-        display_url[host_start:host_end], style=Style(italic=True, bold=True)
-    ).append(
-        display_url[host_end:]
+    url_display = (
+        Text(display_url[:host_start])
+        .append(display_url[host_start:host_end], style=Style(italic=True, bold=True))
+        .append(display_url[host_end:])
     )
     url_display.stylize(Style(link=link_url))
     return url_display
 
 
-def display_results(query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int) -> None:
+def display_results(
+    query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int
+) -> None:
     docs = get_docs()
     rprint()
     rprint(f"Search results for [bold]{query}[/bold]")
-    rprint(f"[dim]Found {len(results)} results from {total_docs} pages in {query_time_ms:.3f} ms[/dim]")
+    rprint(
+        f"[dim]Found {len(results)} results from {total_docs} pages in {query_time_ms:.3f} ms[/dim]"
+    )
     rprint()
 
     for doc_id, score in results[:3]:
@@ -44,11 +46,15 @@ def display_results(query: str, results: list[tuple[str, float]], query_time_ms:
         link_url, display_url = _format_display_url(doc.get("url", ""))
 
         highlighted_title = Text(title)
-        highlighted_title.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
+        highlighted_title.highlight_words(
+            query.split(), HIGHLIGHT_STYLE, case_sensitive=False
+        )
         score_str = f"({score:.4f})"
 
         url_display = _format_url_display(display_url, link_url)
-        url_display.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
+        url_display.highlight_words(
+            query.split(), HIGHLIGHT_STYLE, case_sensitive=False
+        )
 
         rprint(highlighted_title, f"[dim]{score_str}[/dim]")
         rprint("\u21b3", url_display)
@@ -57,6 +63,7 @@ def display_results(query: str, results: list[tuple[str, float]], query_time_ms:
 
 def main() -> None:
     import sys
+
     query = " ".join(sys.argv[1:]).strip()
     if not query:
         print("Usage: semsearch <query>")

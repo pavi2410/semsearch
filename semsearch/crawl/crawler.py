@@ -9,12 +9,16 @@ import httpx
 from rich.live import Live
 from rich.progress import Progress
 
-from .core.html_utils import extract_links
-from .core.robots import USER_AGENT, RobotsCache
-from .core.thread_utils import ThreadSafeDict, ThreadSafeSet
-from .core.tui_util import CrawlStats, make_crawler_display, make_indeterminate_progress
-from .storage import read_content, read_page_meta, save_page
-from .storage.page import normalize_url
+from ..core.thread_utils import ThreadSafeDict, ThreadSafeSet
+from ..core.tui_util import (
+    CrawlStats,
+    make_crawler_display,
+    make_indeterminate_progress,
+)
+from ..storage import read_content, read_page_meta, save_page
+from ..storage.page import normalize_url
+from .html_utils import extract_links
+from .robots import USER_AGENT, RobotsCache
 
 SEED_URLS = [
     "https://en.wikipedia.org",

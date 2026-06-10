@@ -6,11 +6,11 @@ from concurrent.futures.process import BrokenProcessPool
 from rank_bm25 import BM25Okapi
 from rich.console import Console
 
-from .core.html_utils import extract_metadata
-from .core.index_store import dump_docs, dump_index
-from .core.nlp import preprocess
-from .core.tui_util import make_determinate_progress
-from .storage import iter_page_metas, read_content, url_hash
+from ..core.tui_util import make_determinate_progress
+from ..crawl.html_utils import extract_metadata
+from ..search.index_store import dump_docs, dump_index
+from ..storage import iter_page_metas, read_content, url_hash
+from .nlp import preprocess
 
 
 def _process_page(meta: dict) -> tuple[str, str, str, list[str]]:
@@ -56,7 +56,9 @@ def main() -> None:
                     f.cancel()
                 pool.shutdown(wait=False, cancel_futures=True)
         except BrokenProcessPool:
-            console.print("[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]")
+            console.print(
+                "[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]"
+            )
             for meta in metas:
                 url, doc_id, title, tokens = _process_page(meta)
                 docs[doc_id] = {"url": url, "title": title}

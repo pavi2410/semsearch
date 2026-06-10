@@ -2,12 +2,14 @@ import time
 
 from rank_bm25 import BM25Okapi
 
+from ..index.nlp import preprocess
 from .index_store import load_docs, load_index
-from .nlp import preprocess
 
 
 class SearchResult:
-    def __init__(self, query_time_ms: float, results: list[tuple[str, float]], total_docs: int):
+    def __init__(
+        self, query_time_ms: float, results: list[tuple[str, float]], total_docs: int
+    ):
         self.query_time_ms = query_time_ms
         self.results = results
         self.total_docs = total_docs
