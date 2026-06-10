@@ -1,15 +1,13 @@
-import threading
+import asyncio
 import time
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
 from rich.live import Live
-from rich.progress import Progress
+from rich.progress import Progress, TaskID
 
-from ..core.thread_utils import ThreadSafeDict, ThreadSafeSet
 from ..core.tui_util import (
     CrawlStats,
     make_crawler_display,
@@ -29,7 +27,6 @@ HTTP_HEADERS = {
     "Accept-Language": "en",
     "User-Agent": USER_AGENT,
 }
-MAX_WORKERS = 10
 MAX_CONCURRENT_PER_DOMAIN = 2
 RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
 REFETCH_INTERVAL = 86400  # seconds before a cached page is considered stale (24h)
@@ -53,39 +50,34 @@ def is_stale(meta: dict) -> bool:
         return True
 
 
-@dataclass
-class CrawlerContext:
-    progress: Progress
-    task_id: int
-    domain_sems: ThreadSafeDict[str, threading.Semaphore]
-    domain_last_fetch: ThreadSafeDict[str, float]
-    robots_cache: RobotsCache
-    shutdown_event: threading.Event
-    visited: ThreadSafeSet[str]
-    stats: CrawlStats
-
-
-_thread_local = threading.local()
-
-
-def _get_client() -> httpx.Client:
-    if not hasattr(_thread_local, "client"):
-        _thread_local.client = httpx.Client()
-    return _thread_local.client
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
-    client = _get_client()
+@dataclass
+class CrawlerContext:
+    progress: Progress
+    task_id: TaskID
+    client: httpx.AsyncClient
+    domain_sems: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+    domain_last_fetch: dict[str, float] = field(default_factory=dict)
+    robots_cache: RobotsCache = field(init=False)
+    shutdown_event: asyncio.Event = field(default_factory=asyncio.Event)
+    visited: set[str] = field(default_factory=set)
+    stats: CrawlStats = field(default_factory=CrawlStats)
+    queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+
+    def __post_init__(self) -> None:
+        self.robots_cache = RobotsCache(self.client, default_delay=RATE_LIMIT_DELAY)
+
+
+async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
     ctx.stats.inc("in_flight")
     try:
         if ctx.shutdown_event.is_set():
             return None
 
-        if not ctx.robots_cache.can_fetch(url):
+        if not await ctx.robots_cache.can_fetch(url):
             ctx.progress.print(f"  [yellow]Disallowed by robots.txt[/yellow] {url}")
             ctx.stats.inc("robots_blocked")
             return None
@@ -98,19 +90,15 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             return extract_links(html, url)
 
         domain = urlparse(url).hostname or url
-        sem = ctx.domain_sems.get_or_insert(
-            domain, lambda: threading.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
-        )
+        if domain not in ctx.domain_sems:
+            ctx.domain_sems[domain] = asyncio.Semaphore(MAX_CONCURRENT_PER_DOMAIN)
+        sem = ctx.domain_sems[domain]
 
-        while not sem.acquire(timeout=0.5):
+        async with sem:
             if ctx.shutdown_event.is_set():
                 return None
 
-        try:
-            if ctx.shutdown_event.is_set():
-                return None
-
-            effective_delay = ctx.robots_cache.crawl_delay(url)
+            effective_delay = await ctx.robots_cache.crawl_delay(url)
             rate_limit_wait = get_rate_limit_wait(
                 ctx.domain_last_fetch.get(domain), effective_delay
             )
@@ -119,11 +107,11 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                     f"  [dim]Rate limiting {domain} for {rate_limit_wait:.2f}s[/dim]"
                 )
                 ctx.stats.inc("rate_limited")
-                time.sleep(rate_limit_wait)
+                await asyncio.sleep(rate_limit_wait)
 
             ctx.stats.inc("requests")
             try:
-                resp = client.get(
+                resp = await ctx.client.get(
                     url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
                 )
                 resp.raise_for_status()
@@ -138,7 +126,7 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 ctx.progress.print(f"  [red]Error[/red] fetching {url}: {e}")
                 return None
             finally:
-                ctx.domain_last_fetch.set(domain, time.time())
+                ctx.domain_last_fetch[domain] = time.time()
 
             ctx.stats.inc("req_2xx")
             ctx.stats.inc("req_3xx", by=len(resp.history))
@@ -148,7 +136,8 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
 
             final_url = normalize_url(str(resp.url))
             if final_url != url:
-                if ctx.visited.add_if_absent(final_url):
+                if final_url not in ctx.visited:
+                    ctx.visited.add(final_url)
                     ctx.stats.inc("visited")
                 save_page(final_url, html, now)
                 ctx.progress.print(f"  Saved {url} -> {final_url}")
@@ -156,10 +145,39 @@ def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 ctx.progress.print(f"  Saved {url}")
 
             return extract_links(html, url)
-        finally:
-            sem.release()
     finally:
         ctx.stats.inc("in_flight", by=-1)
+
+
+async def _worker(ctx: CrawlerContext) -> None:
+    while True:
+        url = await ctx.queue.get()
+        try:
+            if ctx.shutdown_event.is_set():
+                return
+            links = await _fetch_and_save(url, ctx)
+            if links:
+                ctx.progress.update(ctx.task_id, advance=1)
+                for link in links:
+                    norm_link = normalize_url(link)
+                    if norm_link not in ctx.visited:
+                        ctx.visited.add(norm_link)
+                        ctx.stats.inc("visited")
+                        await ctx.queue.put(norm_link)
+        finally:
+            ctx.queue.task_done()
+
+
+async def _crawl(ctx: CrawlerContext, num_workers: int = 10) -> None:
+    workers = [asyncio.create_task(_worker(ctx)) for _ in range(num_workers)]
+    try:
+        await ctx.queue.join()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        for w in workers:
+            w.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
 
 
 def main() -> None:
@@ -169,64 +187,36 @@ def main() -> None:
     stats = CrawlStats()
     display = make_crawler_display(progress, stats)
 
-    with Live(display, refresh_per_second=4):
-        task_id = progress.add_task("Crawling...", total=None)
+    async def run() -> None:
+        async with httpx.AsyncClient() as client:
+            with Live(display, refresh_per_second=4):
+                task_id = progress.add_task("Crawling...", total=None)
 
-        robots_client = httpx.Client()
-        ctx = CrawlerContext(
-            progress=progress,
-            task_id=task_id,
-            domain_sems=ThreadSafeDict(),
-            domain_last_fetch=ThreadSafeDict(),
-            robots_cache=RobotsCache(robots_client, default_delay=RATE_LIMIT_DELAY),
-            shutdown_event=threading.Event(),
-            visited=ThreadSafeSet(),
-            stats=stats,
-        )
+                ctx = CrawlerContext(
+                    progress=progress,
+                    task_id=task_id,
+                    client=client,
+                    stats=stats,
+                )
 
-        executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
-        pending: set[Future] = set()
+                for url in SEED_URLS:
+                    norm_url = normalize_url(url)
+                    ctx.visited.add(norm_url)
+                    ctx.stats.inc("visited")
+                    await ctx.queue.put(norm_url)
 
-        def submit_url(url: str) -> None:
-            pending.add(executor.submit(_fetch_and_save, url, ctx))
+                try:
+                    await _crawl(ctx)
+                except KeyboardInterrupt:
+                    progress.print("[yellow]Shutting down...[/yellow]")
+                    ctx.shutdown_event.set()
 
-        for url in SEED_URLS:
-            norm_url = normalize_url(url)
-            if ctx.visited.add_if_absent(norm_url):
-                ctx.stats.inc("visited")
-                submit_url(norm_url)
+                progress.update(task_id, description="Crawling complete")
 
-        try:
-            while pending:
-                done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                for future in done:
-                    try:
-                        links = future.result()
-                    except Exception:
-                        continue
-                    if links is None:
-                        continue
-
-                    progress.update(task_id, advance=1)
-
-                    for link in links:
-                        norm_link = normalize_url(link)
-                        if ctx.visited.add_if_absent(norm_link):
-                            ctx.stats.inc("visited")
-                            submit_url(norm_link)
-        except KeyboardInterrupt:
-            progress.print("[yellow]Shutting down...[/yellow]")
-            ctx.shutdown_event.set()
-            for f in pending:
-                f.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-
-        executor.shutdown()
-
-        progress.update(
-            task_id,
-            description="Crawling complete",
-        )
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
