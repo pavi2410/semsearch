@@ -55,6 +55,7 @@ class CrawlStats:
     in_flight: int = 0
     rate_limited: int = 0
     robots_blocked: int = 0
+    blocked: int = 0
     # network / http
     requests: int = 0
     req_2xx: int = 0
@@ -88,6 +89,7 @@ class CrawlStats:
                 ("in-flight", f"{self.in_flight:,}", "bold white"),
                 ("rate-limited", f"{self.rate_limited:,}", "yellow"),
                 ("robots-blocked", f"{self.robots_blocked:,}", "bold yellow"),
+                ("blocked", f"{self.blocked:,}", "bold red"),
             ]
         )
         network_row = row(
@@ -128,6 +130,7 @@ class CrawlStats:
             f"  5xx                {self.req_5xx:>8,}",
             f"  Network errors     {self.error_net:>8,}",
             f"  Robots blocked     {self.robots_blocked:>8,}",
+            f"  Blocked            {self.blocked:>8,}",
         ]
         return "\n".join(lines)
 

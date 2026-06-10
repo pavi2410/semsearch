@@ -16,6 +16,7 @@ from ..core.tui_util import (
 )
 from ..storage import read_content, read_page_meta, save_page
 from ..storage.page import normalize_url
+from .blocks import BlockList
 from .html_utils import extract_links
 from .robots import USER_AGENT, RobotsCache
 from .sitemap import SitemapLoader
@@ -70,10 +71,12 @@ class CrawlerContext:
     stats: CrawlStats = field(default_factory=CrawlStats)
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     sitemap_loader: SitemapLoader = field(init=False)
+    blocklist: BlockList = field(init=False)
 
     def __post_init__(self) -> None:
         self.robots_cache = RobotsCache(self.client, default_delay=RATE_LIMIT_DELAY)
         self.sitemap_loader = SitemapLoader(self.client)
+        self.blocklist = BlockList()
 
 
 async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
@@ -100,6 +103,23 @@ async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
                 await ctx.queue.put(norm)
 
 
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        dt = parsedate_to_datetime(value)
+        return max(0.0, dt.timestamp() - time.time())
+    except Exception:
+        return None
+
+
 async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
     ctx.stats.inc("in_flight")
     try:
@@ -109,6 +129,12 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
         if not await ctx.robots_cache.can_fetch(url):
             ctx.progress.print(f"  [yellow]Disallowed by robots.txt[/yellow] {url}")
             ctx.stats.inc("robots_blocked")
+            return None
+
+        blocked, reason = ctx.blocklist.is_blocked(url)
+        if blocked:
+            ctx.progress.print(f"  [red]Blocked[/red] ({reason}) {url}")
+            ctx.stats.inc("blocked")
             return None
 
         meta = read_page_meta(url)
@@ -150,6 +176,8 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 code = e.response.status_code
                 ctx.stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
                 ctx.progress.print(f"  [red]HTTP {code}[/red] {url}")
+                retry_after = _parse_retry_after(e.response)
+                ctx.blocklist.record(url, code, retry_after)
                 return None
             except Exception as e:
                 ctx.stats.inc("error_net")
