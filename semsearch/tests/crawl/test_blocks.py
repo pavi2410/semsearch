@@ -1,14 +1,20 @@
-import json
 import time
 
 import pytest
 
 from semsearch.crawl.blocks import _5XX_THRESHOLD, BlockList
+from semsearch.storage.models import SyncBlock, init_db
 
 
 @pytest.fixture
-def blocks(tmp_path, monkeypatch):
-    monkeypatch.setattr("semsearch.crawl.blocks._BLOCKS_FILE", tmp_path / "blocks.json")
+def db(tmp_path):
+    init_db(tmp_path / "test.db")
+    yield
+    SyncBlock.delete().execute()
+
+
+@pytest.fixture
+def blocks(db):
     return BlockList()
 
 
@@ -36,8 +42,8 @@ def test_permanent_domain_block(blocks, code):
 
 
 @pytest.mark.parametrize("code", [403, 451])
-def test_permanent_domain_block_persists(tmp_path, monkeypatch, code):
-    monkeypatch.setattr("semsearch.crawl.blocks._BLOCKS_FILE", tmp_path / "blocks.json")
+def test_permanent_domain_block_persists(tmp_path, code):
+    init_db(tmp_path / "test.db")
     b1 = BlockList()
     b1.record("https://example.com/page", code, None)
 
@@ -60,7 +66,7 @@ def test_429_blocks_domain_temporarily(blocks):
 
 def test_429_with_retry_after(blocks):
     blocks.record("https://example.com/page", 429, 30.0)
-    entry = blocks._blocked_domains["example.com"]
+    entry = SyncBlock.get_by_id("example.com")
     assert not entry.permanent
     assert entry.until is not None
     assert entry.until > time.time()
@@ -68,7 +74,6 @@ def test_429_with_retry_after(blocks):
 
 def test_429_expires(blocks, monkeypatch):
     blocks.record("https://example.com/page", 429, 1.0)
-    # Wind time forward past expiry
     monkeypatch.setattr(
         "semsearch.crawl.blocks.time",
         type("t", (), {"time": staticmethod(lambda: time.time() + 10)})(),
@@ -79,8 +84,7 @@ def test_429_expires(blocks, monkeypatch):
 
 def test_429_fallback_delay(blocks):
     blocks.record("https://example.com/page", 429, None)
-    entry = blocks._blocked_domains["example.com"]
-    # fallback is 60s
+    entry = SyncBlock.get_by_id("example.com")
     assert entry.until is not None
     assert entry.until >= time.time() + 55
 
@@ -139,7 +143,6 @@ def test_5xx_does_not_block_domain(blocks):
 def test_5xx_counts_are_per_url(blocks):
     for _ in range(_5XX_THRESHOLD):
         blocks.record("https://example.com/a", 500, None)
-    # different URL should not be blocked
     blocked, _ = blocks.is_blocked("https://example.com/b")
     assert not blocked
 
@@ -149,8 +152,8 @@ def test_5xx_counts_are_per_url(blocks):
 # ------------------------------------------------------------------
 
 
-def test_url_blocks_persist(tmp_path, monkeypatch):
-    monkeypatch.setattr("semsearch.crawl.blocks._BLOCKS_FILE", tmp_path / "blocks.json")
+def test_url_blocks_persist(tmp_path):
+    init_db(tmp_path / "test.db")
     b1 = BlockList()
     b1.record("https://example.com/gone", 404, None)
 
@@ -159,8 +162,8 @@ def test_url_blocks_persist(tmp_path, monkeypatch):
     assert blocked
 
 
-def test_5xx_counts_do_not_persist(tmp_path, monkeypatch):
-    monkeypatch.setattr("semsearch.crawl.blocks._BLOCKS_FILE", tmp_path / "blocks.json")
+def test_5xx_counts_do_not_persist(tmp_path):
+    init_db(tmp_path / "test.db")
     b1 = BlockList()
     url = "https://example.com/flaky"
     for _ in range(_5XX_THRESHOLD - 1):
@@ -168,13 +171,4 @@ def test_5xx_counts_do_not_persist(tmp_path, monkeypatch):
 
     b2 = BlockList()
     blocked, _ = b2.is_blocked(url)
-    assert not blocked
-
-
-def test_corrupt_blocks_file_loads_clean(tmp_path, monkeypatch):
-    f = tmp_path / "blocks.json"
-    f.write_text("not json{{{")
-    monkeypatch.setattr("semsearch.crawl.blocks._BLOCKS_FILE", f)
-    b = BlockList()
-    blocked, _ = b.is_blocked("https://example.com/page")
     assert not blocked

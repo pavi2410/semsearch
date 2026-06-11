@@ -1,7 +1,6 @@
 import time
 
 import httpx
-import pytest
 
 from semsearch.crawl.crawler import _parse_retry_after, get_rate_limit_wait, is_stale
 

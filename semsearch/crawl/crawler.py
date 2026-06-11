@@ -14,7 +14,7 @@ from ..core.tui_util import (
     make_crawler_display,
     make_indeterminate_progress,
 )
-from ..storage import read_content, read_page_meta, save_page
+from ..storage import async_init_db, read_content, read_page_meta, save_page
 from ..storage.page import normalize_url
 from .blocks import BlockList
 from .html_utils import extract_links
@@ -242,6 +242,7 @@ def main() -> None:
     display = make_crawler_display(progress, stats)
 
     async def run() -> None:
+        await async_init_db()
         async with httpx.AsyncClient() as client:
             with Live(display, refresh_per_second=4):
                 task_id = progress.add_task("Crawling...", total=None)

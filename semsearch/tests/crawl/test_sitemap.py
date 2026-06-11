@@ -1,5 +1,4 @@
 import httpx
-import pytest
 
 from semsearch.crawl.sitemap import SitemapLoader
 

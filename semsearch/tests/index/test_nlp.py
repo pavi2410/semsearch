@@ -1,5 +1,3 @@
-import pytest
-
 from semsearch.index.nlp import preprocess, remove_stopwords, stem, tokenize
 
 # ------------------------------------------------------------------

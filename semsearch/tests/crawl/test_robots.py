@@ -1,5 +1,4 @@
 import httpx
-import pytest
 
 from semsearch.crawl.robots import USER_AGENT, RobotsCache
 
@@ -8,7 +7,7 @@ ROBOTS_DISALLOW_ALL = f"User-agent: {USER_AGENT}\nDisallow: /\n"
 ROBOTS_DISALLOW_ADMIN = f"User-agent: {USER_AGENT}\nDisallow: /admin/\n"
 ROBOTS_CRAWL_DELAY = f"User-agent: {USER_AGENT}\nDisallow:\nCrawl-delay: 5\n"
 ROBOTS_WITH_SITEMAP = (
-    f"User-agent: *\nDisallow:\nSitemap: https://example.com/sitemap.xml\n"
+    "User-agent: *\nDisallow:\nSitemap: https://example.com/sitemap.xml\n"
 )
 
 

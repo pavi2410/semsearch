@@ -8,8 +8,9 @@ from rich.console import Console
 
 from ..core.tui_util import make_determinate_progress
 from ..crawl.html_utils import extract_metadata
-from ..search.index_store import dump_docs, dump_index
-from ..storage import iter_page_metas, read_content, url_hash
+from ..search.index_store import dump_index
+from ..storage import init_db, iter_page_metas, read_content, url_hash
+from ..storage.models import SyncPage as Page
 from .nlp import preprocess
 
 
@@ -23,6 +24,7 @@ def _process_page(meta: dict) -> tuple[str, str, str, list[str]]:
 
 
 def main() -> None:
+    init_db()
     metas = list(iter_page_metas())
     domains = Counter(meta["url"].split("/")[2] for meta in metas)
     console = Console()
@@ -31,7 +33,6 @@ def main() -> None:
         f" from [bold]{len(domains)}[/bold] unique domains"
     )
 
-    docs: dict[str, dict[str, str]] = {}
     entries: dict[str, tuple[str, list[str]]] = {}
     interrupted = False
 
@@ -46,8 +47,8 @@ def main() -> None:
             try:
                 for future in as_completed(futures):
                     url, doc_id, title, tokens = future.result()
-                    docs[doc_id] = {"url": url, "title": title}
                     entries[doc_id] = (url, tokens)
+                    Page.update(title=title).where(Page.url_hash == doc_id).execute()
                     progress.advance(task)
             except KeyboardInterrupt:
                 console.print("[yellow]Shutting down...[/yellow]")
@@ -61,8 +62,8 @@ def main() -> None:
             )
             for meta in metas:
                 url, doc_id, title, tokens = _process_page(meta)
-                docs[doc_id] = {"url": url, "title": title}
                 entries[doc_id] = (url, tokens)
+                Page.update(title=title).where(Page.url_hash == doc_id).execute()
                 progress.advance(task)
         else:
             pool.shutdown()
@@ -77,7 +78,6 @@ def main() -> None:
     bm25 = BM25Okapi(corpus_tokens)
 
     dump_index(bm25, doc_ids)
-    dump_docs(docs)
 
 
 if __name__ == "__main__":
