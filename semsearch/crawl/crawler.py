@@ -24,8 +24,11 @@ from .robots import USER_AGENT, RobotsCache
 from .sitemap import SitemapLoader
 
 SEED_URLS = [
+    "https://developer.mozilla.org/en-US/",
+    "https://docs.python.org/3/",
     "https://news.ycombinator.com",
-    "https://en.wikipedia.org",
+    "https://github.com/trending",
+    "https://github.com/explore",
 ]
 HTTP_HEADERS = {
     "Accept": "text/html",
