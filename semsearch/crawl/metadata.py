@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup, SoupStrainer, XMLParsedAsHTMLWarning
 
 from .content_filter import is_fetchable_document_url
+from .main_content import extract_main_text
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -184,6 +185,10 @@ def _parse_jsonld(head) -> dict[str, str]:
 
 
 def _extract_body_text(html: str) -> str:
+    main_text = extract_main_text(html)
+    if main_text:
+        return main_text
+
     body = BeautifulSoup(html, "lxml", parse_only=_BODY)
     for tag in body.find_all(["script", "style", "noscript"]):
         tag.decompose()

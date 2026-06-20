@@ -38,10 +38,19 @@ def _highlight_text(text: str, query: str) -> Text:
 
 
 def _result_snippet(doc: dict[str, str], query: str) -> str:
-    return make_snippet(
-        doc.get("body_excerpt") or doc.get("description") or "",
-        query,
-    )
+    description = doc.get("description", "").strip()
+    body_excerpt = doc.get("body_excerpt", "").strip()
+    source = body_excerpt or description
+    if description and _looks_like_nav_chrome(body_excerpt):
+        source = description
+    return make_snippet(source, query)
+
+
+def _looks_like_nav_chrome(text: str) -> bool:
+    lowered = text.lower()
+    nav_markers = ("open menu", "skip to content", "sign in", "log in")
+    hits = sum(1 for marker in nav_markers if marker in lowered)
+    return hits >= 2 or (hits == 1 and len(text.split()) > 12)
 
 
 def display_results(
