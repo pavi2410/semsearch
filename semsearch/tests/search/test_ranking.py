@@ -68,8 +68,14 @@ def test_pagerank_boosts_linked_pages():
     ]
     boosts = compute_pagerank_boosts(list(docs), url_to_doc, links)
 
-    assert boosts["c"] > boosts["a"]
-    assert boosts["b"] > boosts["a"]
+    assert boosts["c"] > boosts["b"] > boosts["a"]
+    assert boosts["a"] == 1.0
+    assert boosts["c"] == 1.3
+
+
+def test_pagerank_uses_boost_only_floor():
+    boosts = compute_pagerank_boosts(["a", "b", "c"], {}, [])
+    assert all(boost >= 1.0 for boost in boosts.values())
 
 
 def test_pagerank_returns_neutral_boost_without_links():

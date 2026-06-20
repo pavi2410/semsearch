@@ -62,10 +62,15 @@ def compute_pagerank_boosts(
     *,
     iterations: int = 20,
     damping: float = 0.85,
-    min_boost: float = 0.9,
-    max_boost: float = 1.1,
+    min_boost: float = 1.0,
+    max_boost: float = 1.3,
 ) -> dict[str, float]:
-    """Compute PageRank over indexed pages and map ranks to score multipliers."""
+    """Compute PageRank over indexed pages and map ranks to score multipliers.
+
+    Raw PageRank on a crawl subgraph is heavily skewed — a few hubs and a long
+    tail of low-rank pages. We log-scale before normalizing and use boost-only
+    weights so obscure pages stay at 1.0 while linked hubs earn a meaningful lift.
+    """
     if not doc_ids:
         return {}
 
@@ -95,14 +100,14 @@ def compute_pagerank_boosts(
                     next_ranks[doc_id] += per_doc
         ranks = next_ranks
 
-    values = list(ranks.values())
-    min_rank = min(values)
-    max_rank = max(values)
-    if max_rank == min_rank:
+    log_ranks = {doc_id: math.log(ranks[doc_id]) for doc_id in doc_ids}
+    min_log = min(log_ranks.values())
+    max_log = max(log_ranks.values())
+    if max_log == min_log:
         return {doc_id: 1.0 for doc_id in doc_ids}
 
-    span = max_rank - min_rank
+    log_span = max_log - min_log
     return {
-        doc_id: min_boost + (max_boost - min_boost) * (ranks[doc_id] - min_rank) / span
+        doc_id: min_boost + (max_boost - min_boost) * (log_ranks[doc_id] - min_log) / log_span
         for doc_id in doc_ids
     }
