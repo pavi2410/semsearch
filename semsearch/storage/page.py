@@ -1,9 +1,11 @@
 import hashlib
 from collections.abc import Iterator
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .content import save_content
 from .models import SyncPage as Page
+
+_LOCALE_QUERY_KEYS = frozenset({"locale", "lang", "language", "hl"})
 
 
 def normalize_url(url: str) -> str:
@@ -17,7 +19,21 @@ def normalize_url(url: str) -> str:
     if len(path) > 1 and path.endswith("/"):
         path = path.rstrip("/")
     parsed = parsed._replace(path=path)
+    if parsed.query:
+        filtered = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in _LOCALE_QUERY_KEYS
+        ]
+        parsed = parsed._replace(query=urlencode(filtered, doseq=True))
     return urlunparse(parsed)
+
+
+def canonical_key(url: str, canonical_url: str = "") -> str:
+    preferred = canonical_url.strip() if canonical_url else url
+    if not preferred:
+        return ""
+    return normalize_url(preferred)
 
 
 def url_hash(url: str) -> str:

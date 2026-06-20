@@ -5,6 +5,7 @@ from rank_bm25 import BM25Okapi
 from ..index.nlp import preprocess
 from ..storage import init_db
 from ..storage.models import SyncPage as Page
+from .dedup import dedupe_results
 from .index_store import load_index
 from .ranking import apply_ranking, lexical_match_boost
 
@@ -23,6 +24,7 @@ def _load_search_data() -> tuple[BM25Okapi, list[str], dict[str, float], dict[st
     docs = {
         p.url_hash: {
             "url": p.url,
+            "canonical_url": p.canonical_url or "",
             "title": p.title or "",
             "description": p.description or "",
             "body_excerpt": p.body_excerpt or "",
@@ -34,6 +36,7 @@ def _load_search_data() -> tuple[BM25Okapi, list[str], dict[str, float], dict[st
         for p in Page.select(
             Page.url_hash,
             Page.url,
+            Page.canonical_url,
             Page.title,
             Page.description,
             Page.body_excerpt,
@@ -96,6 +99,7 @@ def search(query: str) -> SearchResult:
             )
         )
     results.sort(key=lambda x: x[1], reverse=True)
+    results = dedupe_results(results, _docs)
 
     return SearchResult(
         query_time_ms=(end - start) / 1_000_000,
