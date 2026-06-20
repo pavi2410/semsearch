@@ -144,7 +144,10 @@ def _build_embeddings(
     *,
     force: bool,
     console: Console,
+    progress,
+    task,
 ):
+    console.print("[dim]Loading embedding model...[/dim]")
     embedder = load_embedder()
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     cached = 0
@@ -158,18 +161,22 @@ def _build_embeddings(
                 chunks, vectors = cached_embedding
                 doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
                 cached += 1
+                progress.advance(task)
                 continue
 
         html = read_content(page.content_hash)
         if not is_indexable_page(page.url, html):
+            progress.advance(task)
             continue
         page_meta = extract_page_metadata(html, page.url)
         doc_embedding = embed_document(page_meta, model=embedder)
         if doc_embedding is None:
+            progress.advance(task)
             continue
         save_embedding(page.content_hash, doc_embedding.chunks, doc_embedding.vectors)
         doc_embeddings[doc_id] = doc_embedding
         embedded += 1
+        progress.advance(task)
 
     console.print(f"[dim]{cached} embedding cache hits, {embedded} embedded[/dim]")
     return build_embedding_index(doc_ids, doc_embeddings)
@@ -285,15 +292,30 @@ def main(argv: list[str] | None = None) -> None:
 
     doc_ids = list(entries.keys())
     corpus_tokens = [entries[doc_id] for doc_id in doc_ids]
+    console.print("[dim]Building BM25 index...[/dim]")
     bm25 = BM25Okapi(corpus_tokens)
+    console.print("[dim]Computing PageRank...[/dim]")
     pagerank = _build_pagerank(doc_ids)
     embedding_index = None
     if is_model_installed():
-        embedding_index = _build_embeddings(doc_ids, force=args.force, console=console)
+        embedding_progress = make_determinate_progress()
+        with embedding_progress:
+            embedding_task = embedding_progress.add_task(
+                "Building semantic embeddings",
+                total=len(doc_ids),
+            )
+            embedding_index = _build_embeddings(
+                doc_ids,
+                force=args.force,
+                console=console,
+                progress=embedding_progress,
+                task=embedding_task,
+            )
     else:
         console.print(
             "[dim]Semantic embeddings skipped — run `uv run setup-models` to enable them[/dim]"
         )
+    console.print("[dim]Writing index files...[/dim]")
     dump_index(bm25, doc_ids, pagerank, embedding_index)
     console.print(
         f"[green]Built index with {len(doc_ids)} documents"
