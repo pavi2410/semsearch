@@ -19,7 +19,7 @@ from .ranking import (
 )
 from .semantic import semantic_scores
 
-SEMANTIC_BM25_SCALE = 8.0
+SEMANTIC_RRF_WEIGHT = 1.25
 
 
 @dataclass(frozen=True)
@@ -107,8 +107,6 @@ def format_score_breakdown(breakdown: ScoreBreakdown) -> str:
         parts.append(f"pagerank×{breakdown.pagerank:.2f}")
     if abs(breakdown.title - 1.0) > 0.001:
         parts.append(f"title×{breakdown.title:.2f}")
-    if breakdown.fusion > 0:
-        parts.append(f"fusion×{breakdown.fusion_multiplier:.3f}")
 
     return " · ".join(parts)
 
@@ -170,10 +168,24 @@ def format_score_breakdown_rich(breakdown: ScoreBreakdown) -> tuple[Text, Text |
         append_part(multipliers, "pagerank×", f"{breakdown.pagerank:.2f}")
     if abs(breakdown.title - 1.0) > 0.001:
         append_part(multipliers, "title×", f"{breakdown.title:.2f}")
-    if breakdown.fusion > 0:
-        append_part(multipliers, "fusion×", f"{breakdown.fusion_multiplier:.3f}")
 
     return signals, multipliers if multipliers.plain else None
+
+
+def _relevance_base(
+    *,
+    fusion_boost: float,
+    bm25_score: float,
+    semantic_score: float,
+    bm25_max: float,
+) -> tuple[float, str] | None:
+    if fusion_boost > 0:
+        return fusion_boost, "rrf"
+    if bm25_score > 0 and bm25_max > 0:
+        return bm25_score / bm25_max, "bm25"
+    if semantic_score > 0:
+        return semantic_score, "sem"
+    return None
 
 
 def _score_document(
@@ -191,20 +203,23 @@ def _score_document(
     pagerank_boost: float,
     doc: dict[str, str],
 ) -> SearchHit | None:
-    semantic_scaled = semantic_score * SEMANTIC_BM25_SCALE
-    base_score = max(bm25_score, semantic_scaled)
-    if base_score <= 0:
+    relevance = _relevance_base(
+        fusion_boost=fusion_boost,
+        bm25_score=bm25_score,
+        semantic_score=semantic_score,
+        bm25_max=bm25_max,
+    )
+    if relevance is None:
         return None
 
-    base_source = "sem" if semantic_scaled > bm25_score else "bm25"
+    base_score, base_source = relevance
     recency = recency_boost(doc)
     secure = https_boost(doc)
     meta_raw = metadata_multiplier(doc, pagerank_boost=pagerank_boost)
-    relevance = min(1.0, base_score / bm25_max) if bm25_max > 0 else 0.0
-    metadata = dampen_metadata_boost(meta_raw, relevance) if bm25_max > 0 else meta_raw
+    bm25_relevance = min(1.0, bm25_score / bm25_max) if bm25_max > 0 else 0.0
+    metadata = dampen_metadata_boost(meta_raw, bm25_relevance) if bm25_max > 0 else meta_raw
     title = lexical_match_boost(query, query_tokens, doc)
-    fusion_multiplier = 1.0 + fusion_boost if fusion_boost else 1.0
-    final = base_score * metadata * title * fusion_multiplier
+    final = base_score * metadata * title
 
     breakdown = ScoreBreakdown(
         bm25=bm25_score,
@@ -220,7 +235,7 @@ def _score_document(
         metadata=metadata,
         title=title,
         fusion=fusion_boost,
-        fusion_multiplier=fusion_multiplier,
+        fusion_multiplier=1.0,
         final=final,
     )
     return SearchHit(doc_id=doc_id, score=final, breakdown=breakdown)
@@ -284,6 +299,16 @@ def get_docs() -> dict[str, dict[str, str]]:
     return _docs
 
 
+def _sort_hits(results: list[SearchHit]) -> None:
+    results.sort(
+        key=lambda hit: (
+            hit.breakdown.fused_rank if hit.breakdown.fused_rank is not None else 10**9,
+            -hit.score,
+            hit.doc_id,
+        )
+    )
+
+
 def search(query: str) -> SearchResult:
     _ensure_index()
     start = time.perf_counter_ns()
@@ -306,7 +331,14 @@ def search(query: str) -> SearchResult:
         if score > 0
     ]
     semantic_ranking = sorted(semantic.keys(), key=lambda doc_id: semantic[doc_id], reverse=True)
-    fused_scores = reciprocal_rank_fusion(bm25_ranking, semantic_ranking)
+    if semantic_ranking:
+        fused_scores = reciprocal_rank_fusion(
+            bm25_ranking,
+            semantic_ranking,
+            weights=[1.0, SEMANTIC_RRF_WEIGHT],
+        )
+    else:
+        fused_scores = reciprocal_rank_fusion(bm25_ranking)
     bm25_ranks, semantic_ranks, fused_ranks = build_rank_maps(
         bm25_ranking,
         semantic_ranking,
@@ -338,7 +370,7 @@ def search(query: str) -> SearchResult:
         if hit is not None:
             results.append(hit)
 
-    results.sort(key=lambda hit: hit.score, reverse=True)
+    _sort_hits(results)
     results = dedupe_results(results, _docs)
 
     return SearchResult(
