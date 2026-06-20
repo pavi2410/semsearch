@@ -6,7 +6,7 @@ from ..index.nlp import preprocess
 from ..storage import init_db
 from ..storage.models import SyncPage as Page
 from .index_store import load_index
-from .ranking import apply_ranking
+from .ranking import apply_ranking, lexical_match_boost
 
 
 class SearchResult:
@@ -91,7 +91,8 @@ def search(query: str) -> SearchResult:
                     doc,
                     pagerank_boost=pagerank_boost,
                     bm25_max=bm25_max,
-                ),
+                )
+                * lexical_match_boost(query, query_tokens, doc),
             )
         )
     results.sort(key=lambda x: x[1], reverse=True)

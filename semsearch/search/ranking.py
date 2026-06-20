@@ -1,6 +1,8 @@
 import math
 from datetime import datetime, timezone
 
+from ..index.nlp import preprocess
+
 
 def _parse_timestamp(value: str) -> datetime | None:
     if not value:
@@ -78,6 +80,38 @@ def apply_ranking(
         relevance = min(1.0, bm25_score / bm25_max)
         meta = dampen_metadata_boost(meta, relevance)
     return bm25_score * meta
+
+
+def _has_adjacent_token_sequence(needle: list[str], haystack: list[str]) -> bool:
+    if len(needle) < 2 or len(needle) > len(haystack):
+        return False
+    width = len(needle)
+    for index in range(len(haystack) - width + 1):
+        if haystack[index : index + width] == needle:
+            return True
+    return False
+
+
+def lexical_match_boost(query: str, query_tokens: list[str], doc: dict[str, str]) -> float:
+    """Reward title matches, especially full phrases and adjacent query terms."""
+    title = doc.get("title", "")
+    if not title or not query_tokens:
+        return 1.0
+
+    query_lower = query.lower().strip()
+    title_lower = title.lower()
+    if query_lower and query_lower in title_lower:
+        return 1.25
+
+    title_tokens = preprocess(title)
+    if _has_adjacent_token_sequence(query_tokens, title_tokens):
+        return 1.15
+
+    title_token_set = set(title_tokens)
+    if all(token in title_token_set for token in query_tokens):
+        return 1.10
+
+    return 1.0
 
 
 def compute_pagerank_boosts(

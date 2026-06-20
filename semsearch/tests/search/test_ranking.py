@@ -6,6 +6,7 @@ from semsearch.search.ranking import (
     dampen_metadata_boost,
     effective_timestamp,
     https_boost,
+    lexical_match_boost,
     recency_boost,
 )
 from semsearch.storage.page import normalize_url
@@ -118,3 +119,21 @@ def test_apply_ranking_preserves_bm25_order_for_strong_matches():
     hub_score = apply_ranking(6.0, hub, pagerank_boost=1.3, bm25_max=8.0)
 
     assert relevant_score > hub_score
+
+
+def test_lexical_match_boost_prefers_phrase_in_title():
+    query = "stop ai"
+    tokens = ["stop", "ai"]
+    bbc = {"title": "How to stop AI from turning your brain to mush"}
+    github = {"title": "GitHub Advanced Security"}
+
+    assert lexical_match_boost(query, tokens, bbc) > lexical_match_boost(query, tokens, github)
+
+
+def test_lexical_match_boost_rewards_all_terms_in_title():
+    boost = lexical_match_boost("rust async", ["rust", "async"], {"title": "Async Rust guide"})
+    assert boost == 1.10
+
+
+def test_lexical_match_boost_is_neutral_without_title():
+    assert lexical_match_boost("stop ai", ["stop", "ai"], {}) == 1.0
