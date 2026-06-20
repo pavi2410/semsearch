@@ -1,4 +1,5 @@
 from html import unescape as unescape_html
+import re
 from urllib.parse import unquote, urlparse
 
 from rich import print as rprint
@@ -10,6 +11,7 @@ from .search.snippet import make_snippet
 
 HIGHLIGHT_STYLE = Style(bgcolor="yellow")
 RESULT_LIMIT = 10
+_MIN_SUBSTRING_HIGHLIGHT_LEN = 3
 
 
 def _format_display_url(url: str) -> tuple[str, str]:
@@ -31,10 +33,21 @@ def _format_url_display(display_url: str, link_url: str) -> Text:
     return url_display
 
 
+def _apply_query_highlights(text: Text, query: str) -> Text:
+    for term in query.split():
+        cleaned = term.strip()
+        if not cleaned:
+            continue
+        if len(cleaned) < _MIN_SUBSTRING_HIGHLIGHT_LEN:
+            pattern = rf"(?i)\b{re.escape(cleaned)}\b"
+            text.highlight_regex(pattern, HIGHLIGHT_STYLE)
+        else:
+            text.highlight_words([cleaned], HIGHLIGHT_STYLE, case_sensitive=False)
+    return text
+
+
 def _highlight_text(text: str, query: str) -> Text:
-    highlighted = Text(text)
-    highlighted.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
-    return highlighted
+    return _apply_query_highlights(Text(text), query)
 
 
 def _result_snippet(doc: dict[str, str], query: str) -> str:
@@ -76,7 +89,7 @@ def display_results(
         language_str = f" [{language}]" if language else ""
 
         url_display = _format_url_display(display_url, link_url)
-        url_display.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
+        _apply_query_highlights(url_display, query)
 
         rprint(highlighted_title, f"[dim]{score_str}{language_str}[/dim]")
         rprint("\u21b3", url_display)
