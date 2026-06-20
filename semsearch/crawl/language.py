@@ -108,3 +108,26 @@ def extract_language(html: str, body_text: str = "") -> str:
         if language:
             return language
     return ""
+
+
+_CRAWL_LANGUAGES = frozenset({"en"})
+
+
+def is_crawlable_language(language: str) -> bool:
+    """Allow English pages and pages with unknown language."""
+    if not language:
+        return True
+    return language in _CRAWL_LANGUAGES
+
+
+def detect_page_language(content: str, content_type: str | None = None) -> str:
+    if content_type:
+        mime = content_type.split(";", 1)[0].strip().lower()
+        if mime in {
+            "text/plain",
+            "text/markdown",
+            "text/x-markdown",
+            "application/markdown",
+        }:
+            return detect_language_from_text(content)
+    return extract_language(content)

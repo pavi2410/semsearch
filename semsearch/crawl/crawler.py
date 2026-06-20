@@ -14,11 +14,19 @@ from ..core.tui_util import (
     make_crawler_display,
     make_indeterminate_progress,
 )
-from ..storage import async_init_db, async_read_page_meta, async_save_page, read_content
+from ..storage import (
+    async_init_db,
+    async_read_page_meta,
+    async_save_page,
+    async_touch_page,
+    init_db,
+    read_content,
+)
 from ..storage.models import db
 from ..storage.page import normalize_url
 from .blocks import BlockList
 from .content_filter import is_fetchable_document_url, is_indexable_page
+from .language import detect_page_language, is_crawlable_language
 from .metadata import extract_outbound_links
 from .robots import USER_AGENT, RobotsCache
 from .sitemap import SitemapLoader
@@ -31,7 +39,7 @@ SEED_URLS = [
     "https://github.com/explore",
 ]
 HTTP_HEADERS = {
-    "Accept": "text/html",
+    "Accept": "text/html, application/xhtml+xml, text/plain, text/markdown",
     "Accept-Language": "en",
     "User-Agent": USER_AGENT,
 }
@@ -56,6 +64,38 @@ def is_stale(meta: dict) -> bool:
         return time.time() - parsed.timestamp() >= REFETCH_INTERVAL
     except ValueError:
         return True
+
+
+def build_conditional_headers(meta: dict | None) -> dict[str, str]:
+    """Build If-None-Match / If-Modified-Since headers from stored page metadata."""
+    if meta is None:
+        return {}
+    headers: dict[str, str] = {}
+    etag = meta.get("etag", "").strip()
+    if etag:
+        headers["If-None-Match"] = etag
+    last_modified = meta.get("httpLastModified", "").strip()
+    if last_modified:
+        headers["If-Modified-Since"] = last_modified
+    return headers
+
+
+def parse_cache_headers(response: httpx.Response) -> tuple[str | None, str | None]:
+    etag = response.headers.get("ETag")
+    last_modified = response.headers.get("Last-Modified")
+    return (
+        etag.strip() if etag else None,
+        last_modified.strip() if last_modified else None,
+    )
+
+
+def _links_from_cached(meta: dict, url: str) -> list[str]:
+    html = read_content(meta["contentHash"])
+    return [
+        link
+        for link in extract_outbound_links(html, url)
+        if is_fetchable_document_url(link)
+    ]
 
 
 def _now() -> str:
@@ -148,12 +188,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
         if meta is not None and not is_stale(meta):
             ctx.progress.print(f"  Skip fetching {url}")
             ctx.stats.inc("skipped")
-            html = read_content(meta["contentHash"])
-            return [
-                link
-                for link in extract_outbound_links(html, url)
-                if is_fetchable_document_url(link)
-            ]
+            return _links_from_cached(meta, url)
 
         is_new_page = meta is None
         domain = urlparse(url).hostname or url
@@ -177,12 +212,35 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 await asyncio.sleep(rate_limit_wait)
 
             ctx.stats.inc("requests")
+            request_headers = {**HTTP_HEADERS, **build_conditional_headers(meta)}
             try:
                 resp = await ctx.client.get(
-                    url, headers=HTTP_HEADERS, follow_redirects=True, timeout=5
+                    url,
+                    headers=request_headers,
+                    follow_redirects=True,
+                    timeout=5,
                 )
+                if resp.status_code == 304:
+                    if meta is None:
+                        ctx.progress.print(f"  [yellow]Unexpected 304[/yellow] {url}")
+                        return None
+                    ctx.stats.inc("not_modified")
+                    ctx.stats.inc("req_3xx")
+                    now = _now()
+                    resp_etag, resp_last_modified = parse_cache_headers(resp)
+                    await async_touch_page(
+                        url,
+                        now,
+                        etag=resp_etag or meta.get("etag") or None,
+                        http_last_modified=resp_last_modified
+                        or meta.get("httpLastModified")
+                        or None,
+                    )
+                    ctx.progress.print(f"  Not modified {url}")
+                    return _links_from_cached(meta, url)
+
                 resp.raise_for_status()
-                html = resp.text
+                body = resp.text
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code
                 ctx.stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
@@ -201,31 +259,52 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             ctx.stats.inc("req_3xx", by=len(resp.history))
 
             content_type = resp.headers.get("Content-Type")
-            if not is_indexable_page(url, html, content_type):
+            if not is_indexable_page(url, body, content_type):
                 ctx.progress.print(
-                    f"  [yellow]Skipping non-HTML[/yellow] {url}"
+                    f"  [yellow]Skipping unsupported content[/yellow] {url}"
                     f" ({content_type or 'unknown type'})"
                 )
                 ctx.stats.inc("skipped")
                 return None
 
+            language = detect_page_language(body, content_type)
+            if not is_crawlable_language(language):
+                ctx.progress.print(
+                    f"  [yellow]Skipping non-English[/yellow] {url} ({language})"
+                )
+                ctx.stats.inc("language_skipped")
+                return None
+
             ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
             now = _now()
-            await async_save_page(url, html, now)
+            etag, http_last_modified = parse_cache_headers(resp)
+            await async_save_page(
+                url,
+                body,
+                now,
+                etag=etag,
+                http_last_modified=http_last_modified,
+            )
 
             final_url = normalize_url(str(resp.url))
             if final_url != url:
                 if final_url not in ctx.visited:
                     ctx.visited.add(final_url)
                     ctx.stats.inc("visited")
-                await async_save_page(final_url, html, now)
+                await async_save_page(
+                    final_url,
+                    body,
+                    now,
+                    etag=etag,
+                    http_last_modified=http_last_modified,
+                )
                 ctx.progress.print(f"  Saved {url} -> {final_url}")
             else:
                 ctx.progress.print(f"  Saved {url}")
 
             return [
                 link
-                for link in extract_outbound_links(html, url)
+                for link in extract_outbound_links(body, url)
                 if is_fetchable_document_url(link)
             ]
     finally:
@@ -271,6 +350,7 @@ def main() -> None:
     display = make_crawler_display(progress, stats)
 
     async def run() -> None:
+        init_db()
         await async_init_db()
         async with db:
             async with httpx.AsyncClient() as client:

@@ -2,7 +2,13 @@ import time
 
 import httpx
 
-from semsearch.crawl.crawler import _parse_retry_after, get_rate_limit_wait, is_stale
+from semsearch.crawl.crawler import (
+    _parse_retry_after,
+    build_conditional_headers,
+    get_rate_limit_wait,
+    is_stale,
+    parse_cache_headers,
+)
 
 # ------------------------------------------------------------------
 # get_rate_limit_wait
@@ -91,3 +97,37 @@ def test_retry_after_http_date():
 def test_retry_after_invalid_returns_none():
     resp = _make_response("not-a-valid-value")
     assert _parse_retry_after(resp) is None
+
+
+# ------------------------------------------------------------------
+# conditional HTTP helpers
+# ------------------------------------------------------------------
+
+
+def test_build_conditional_headers_empty_without_meta():
+    assert build_conditional_headers(None) == {}
+
+
+def test_build_conditional_headers_uses_etag_and_last_modified():
+    meta = {
+        "etag": '"abc123"',
+        "httpLastModified": "Wed, 21 Oct 2015 07:28:00 GMT",
+    }
+    assert build_conditional_headers(meta) == {
+        "If-None-Match": '"abc123"',
+        "If-Modified-Since": "Wed, 21 Oct 2015 07:28:00 GMT",
+    }
+
+
+def test_parse_cache_headers():
+    resp = httpx.Response(
+        200,
+        headers={
+            "ETag": '"etag-value"',
+            "Last-Modified": "Wed, 21 Oct 2015 07:28:00 GMT",
+        },
+    )
+    assert parse_cache_headers(resp) == (
+        '"etag-value"',
+        "Wed, 21 Oct 2015 07:28:00 GMT",
+    )

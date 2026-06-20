@@ -25,6 +25,13 @@ _NON_HTML_EXTENSIONS = {
 }
 
 _HTML_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
+_TEXT_CONTENT_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/markdown",
+}
+_INDEXABLE_CONTENT_TYPES = _HTML_CONTENT_TYPES | _TEXT_CONTENT_TYPES
 
 
 def url_path_extension(url: str) -> str:
@@ -47,6 +54,13 @@ def is_html_content_type(content_type: str | None) -> bool:
     return mime in _HTML_CONTENT_TYPES
 
 
+def is_indexable_content_type(content_type: str | None) -> bool:
+    if not content_type:
+        return True
+    mime = content_type.split(";", 1)[0].strip().lower()
+    return mime in _INDEXABLE_CONTENT_TYPES
+
+
 def looks_like_json(text: str) -> bool:
     stripped = text.lstrip()
     if not stripped.startswith(("{", "[")):
@@ -61,6 +75,6 @@ def looks_like_json(text: str) -> bool:
 def is_indexable_page(url: str, content: str, content_type: str | None = None) -> bool:
     if not is_fetchable_document_url(url):
         return False
-    if content_type is not None and not is_html_content_type(content_type):
+    if content_type is not None and not is_indexable_content_type(content_type):
         return False
     return not looks_like_json(content)

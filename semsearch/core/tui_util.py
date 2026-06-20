@@ -86,6 +86,8 @@ class CrawlStats:
     pages_new: int = 0
     pages_refreshed: int = 0
     skipped: int = 0
+    not_modified: int = 0
+    language_skipped: int = 0
     sitemap_urls: int = 0
     domains_discovered: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -125,7 +127,9 @@ class CrawlStats:
                 ("discovered", f"{self.visited:,}", "bold white"),
                 ("new", f"{self.pages_new:,}", "bold green"),
                 ("refreshed", f"{self.pages_refreshed:,}", "green"),
+                ("not-modified", f"{self.not_modified:,}", "bold cyan"),
                 ("skipped", f"{self.skipped:,}", "cyan"),
+                ("non-english", f"{self.language_skipped:,}", "yellow"),
                 ("sitemap-urls", f"{self.sitemap_urls:,}", "cyan"),
                 ("domains", f"{self.domains_discovered:,}", "bold white"),
             ]
@@ -137,7 +141,9 @@ class CrawlStats:
             "[bold]Crawl summary[/bold]",
             f"  Pages new          {self.pages_new:>8,}",
             f"  Pages refreshed    {self.pages_refreshed:>8,}",
+            f"  Not modified (304) {self.not_modified:>8,}",
             f"  Pages skipped      {self.skipped:>8,}",
+            f"  Non-English        {self.language_skipped:>8,}",
             f"  Domains discovered {self.domains_discovered:>8,}",
             f"  Sitemap URLs       {self.sitemap_urls:>8,}",
             "",

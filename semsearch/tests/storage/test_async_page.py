@@ -12,6 +12,8 @@ async def test_async_save_and_read_page_meta(tmp_path):
             "https://example.com/page",
             "<html><body>Hello</body></html>",
             "2026-06-20T00:00:00Z",
+            etag='"abc"',
+            http_last_modified="Wed, 21 Oct 2015 07:28:00 GMT",
         )
 
         meta = await async_read_page_meta("https://example.com/page")
@@ -19,6 +21,8 @@ async def test_async_save_and_read_page_meta(tmp_path):
     assert meta == saved
     assert meta is not None
     assert meta["url"] == "https://example.com/page"
+    assert meta["etag"] == '"abc"'
+    assert meta["httpLastModified"] == "Wed, 21 Oct 2015 07:28:00 GMT"
 
 
 @pytest.mark.asyncio

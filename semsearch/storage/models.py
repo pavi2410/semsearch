@@ -20,6 +20,8 @@ _PAGE_COLUMNS = {
     "jsonld_types": "TEXT",
     "language": "TEXT",
     "indexed_content_hash": "TEXT",
+    "etag": "TEXT",
+    "http_last_modified": "TEXT",
 }
 
 # Async db used by the crawler (inside asyncio event loop)
@@ -84,6 +86,8 @@ class Page(BaseModel):
     jsonld_types = TextField(null=True)
     language = TextField(null=True)
     indexed_content_hash = TextField(null=True)
+    etag = TextField(null=True)
+    http_last_modified = TextField(null=True)
 
     class Meta:
         table_name = "pages"
@@ -126,6 +130,8 @@ class SyncPage(Model):
     jsonld_types = TextField(null=True)
     language = TextField(null=True)
     indexed_content_hash = TextField(null=True)
+    etag = TextField(null=True)
+    http_last_modified = TextField(null=True)
 
     class Meta:
         table_name = "pages"

@@ -1,6 +1,8 @@
 from semsearch.crawl.language import (
     detect_language_from_text,
+    detect_page_language,
     extract_language,
+    is_crawlable_language,
     normalize_language_code,
 )
 
@@ -36,3 +38,17 @@ def test_detect_language_from_text_fallback():
         "pour les petites entreprises dans plusieurs régions du pays."
     )
     assert extract_language(html, french) == "fr"
+
+
+def test_is_crawlable_language():
+    assert is_crawlable_language("") is True
+    assert is_crawlable_language("en") is True
+    assert is_crawlable_language("fr") is False
+
+
+def test_detect_page_language_for_plain_text():
+    text = (
+        "This is a long enough English paragraph to pass language detection "
+        "with high confidence for crawl filtering purposes."
+    )
+    assert detect_page_language(text, "text/plain") == "en"

@@ -40,7 +40,28 @@ def url_hash(url: str) -> str:
     return hashlib.sha256(normalize_url(url).encode()).hexdigest()[:16]
 
 
-def save_page(url: str, html: str, last_fetched: str) -> dict:
+def _page_meta(
+    page: Page,
+    *,
+    content_hash: str | None = None,
+) -> dict:
+    return {
+        "url": page.url,
+        "lastFetchedAt": page.fetched_at,
+        "contentHash": content_hash or page.content_hash,
+        "etag": page.etag or "",
+        "httpLastModified": page.http_last_modified or "",
+    }
+
+
+def save_page(
+    url: str,
+    html: str,
+    last_fetched: str,
+    *,
+    etag: str | None = None,
+    http_last_modified: str | None = None,
+) -> dict:
     content_hash = save_content(html)
     url = normalize_url(url)
     h = url_hash(url)
@@ -49,11 +70,26 @@ def save_page(url: str, html: str, last_fetched: str) -> dict:
         url=url,
         fetched_at=last_fetched,
         content_hash=content_hash,
+        etag=etag,
+        http_last_modified=http_last_modified,
     ).execute()
-    return {"url": url, "lastFetchedAt": last_fetched, "contentHash": content_hash}
+    return {
+        "url": url,
+        "lastFetchedAt": last_fetched,
+        "contentHash": content_hash,
+        "etag": etag or "",
+        "httpLastModified": http_last_modified or "",
+    }
 
 
-async def async_save_page(url: str, html: str, last_fetched: str) -> dict:
+async def async_save_page(
+    url: str,
+    html: str,
+    last_fetched: str,
+    *,
+    etag: str | None = None,
+    http_last_modified: str | None = None,
+) -> dict:
     from .models import Page as AsyncPage, db
 
     content_hash = save_content(html)
@@ -65,22 +101,44 @@ async def async_save_page(url: str, html: str, last_fetched: str) -> dict:
             url=url,
             fetched_at=last_fetched,
             content_hash=content_hash,
+            etag=etag,
+            http_last_modified=http_last_modified,
         )
     )
-    return {"url": url, "lastFetchedAt": last_fetched, "contentHash": content_hash}
+    return {
+        "url": url,
+        "lastFetchedAt": last_fetched,
+        "contentHash": content_hash,
+        "etag": etag or "",
+        "httpLastModified": http_last_modified or "",
+    }
+
+
+async def async_touch_page(
+    url: str,
+    last_fetched: str,
+    *,
+    etag: str | None = None,
+    http_last_modified: str | None = None,
+) -> None:
+    from .models import Page as AsyncPage, db
+
+    updates: dict[str, str] = {"fetched_at": last_fetched}
+    if etag is not None:
+        updates["etag"] = etag
+    if http_last_modified is not None:
+        updates["http_last_modified"] = http_last_modified
+    h = url_hash(normalize_url(url))
+    await db.aexecute(AsyncPage.update(**updates).where(AsyncPage.url_hash == h))
 
 
 def read_page_meta(url: str) -> dict | None:
     h = url_hash(normalize_url(url))
     try:
         page = Page.get_by_id(h)
-        return {
-            "url": page.url,
-            "lastFetchedAt": page.fetched_at,
-            "contentHash": page.content_hash,
-        }
     except Page.DoesNotExist:
         return None
+    return _page_meta(page)
 
 
 async def async_read_page_meta(url: str) -> dict | None:
@@ -91,11 +149,7 @@ async def async_read_page_meta(url: str) -> dict | None:
         page = await db.get(AsyncPage.select().where(AsyncPage.url_hash == h))
     except AsyncPage.DoesNotExist:
         return None
-    return {
-        "url": page.url,
-        "lastFetchedAt": page.fetched_at,
-        "contentHash": page.content_hash,
-    }
+    return _page_meta(page)
 
 
 def iter_page_metas() -> Iterator[dict]:

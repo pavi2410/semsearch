@@ -3,6 +3,7 @@ import json
 from semsearch.crawl.content_filter import (
     is_fetchable_document_url,
     is_html_content_type,
+    is_indexable_content_type,
     is_indexable_page,
     looks_like_json,
     url_path_extension,
@@ -29,6 +30,13 @@ def test_is_html_content_type():
     assert is_html_content_type("application/json") is False
 
 
+def test_is_indexable_content_type():
+    assert is_indexable_content_type("text/html; charset=utf-8") is True
+    assert is_indexable_content_type("text/plain") is True
+    assert is_indexable_content_type("text/markdown") is True
+    assert is_indexable_content_type("application/json") is False
+
+
 def test_looks_like_json():
     assert looks_like_json('{"id": 1, "title": "hello"}') is True
     assert looks_like_json("<html><body>hello</body></html>") is False
@@ -45,3 +53,8 @@ def test_is_indexable_page():
         json.dumps({"title": "Poll"}),
         "application/json",
     ) is False
+    assert is_indexable_page(
+        "https://example.com/readme.md",
+        "# Title\n\nSome markdown content here.",
+        "text/markdown",
+    )
