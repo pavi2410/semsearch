@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from rank_bm25 import BM25Okapi
 from rich.console import Console
 
+from fastembed import TextEmbedding
+
 from ..core.tui_util import make_determinate_progress
 from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
@@ -20,7 +22,7 @@ from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
 from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
-from .embeddings import DocumentEmbedding, build_embedding_index, embed_document
+from .embeddings import DocumentEmbedding, EmbeddingIndex, build_embedding_index, embed_document
 from .embedding_model import is_model_installed, load_embedder
 from .nlp import preprocess
 
@@ -142,13 +144,11 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
 def _build_embeddings(
     doc_ids: list[str],
     *,
+    embedder: TextEmbedding,
     force: bool,
-    console: Console,
     progress,
     task,
-):
-    console.print("[dim]Loading embedding model...[/dim]")
-    embedder = load_embedder()
+) -> tuple[EmbeddingIndex | None, int, int]:
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     cached = 0
     embedded = 0
@@ -178,8 +178,7 @@ def _build_embeddings(
         embedded += 1
         progress.advance(task)
 
-    console.print(f"[dim]{cached} embedding cache hits, {embedded} embedded[/dim]")
-    return build_embedding_index(doc_ids, doc_embeddings)
+    return build_embedding_index(doc_ids, doc_embeddings), cached, embedded
 
 
 def _run_process_pool(
@@ -298,19 +297,24 @@ def main(argv: list[str] | None = None) -> None:
     pagerank = _build_pagerank(doc_ids)
     embedding_index = None
     if is_model_installed():
+        console.print("[dim]Loading embedding model...[/dim]")
+        embedder = load_embedder()
         embedding_progress = make_determinate_progress()
         with embedding_progress:
             embedding_task = embedding_progress.add_task(
                 "Building semantic embeddings",
                 total=len(doc_ids),
             )
-            embedding_index = _build_embeddings(
+            embedding_index, cached, embedded = _build_embeddings(
                 doc_ids,
+                embedder=embedder,
                 force=args.force,
-                console=console,
                 progress=embedding_progress,
                 task=embedding_task,
             )
+        console.print(
+            f"[dim]{cached} embedding cache hits, {embedded} embedded[/dim]"
+        )
     else:
         console.print(
             "[dim]Semantic embeddings skipped — run `uv run setup-models` to enable them[/dim]"
