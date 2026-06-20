@@ -13,9 +13,11 @@ from ..core.tui_util import make_determinate_progress
 from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
+from ..search.ranking import compute_pagerank_boosts
 from ..storage import init_db, iter_page_metas, read_content, url_hash
 from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
+from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
 from .nlp import preprocess
 
@@ -121,6 +123,17 @@ def _persist_page(doc_id: str, content_hash: str, page_meta: PageMetadata) -> No
 
 def _clear_index_state(doc_id: str) -> None:
     Page.update(indexed_content_hash=None).where(Page.url_hash == doc_id).execute()
+
+
+def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
+    doc_id_set = set(doc_ids)
+    url_to_doc = {
+        normalize_url(page.url): page.url_hash
+        for page in Page.select(Page.url, Page.url_hash)
+        if page.url_hash in doc_id_set
+    }
+    links = [(link.source_hash, link.target_url) for link in Link.select()]
+    return compute_pagerank_boosts(doc_ids, url_to_doc, links)
 
 
 def _run_process_pool(
@@ -234,8 +247,12 @@ def main(argv: list[str] | None = None) -> None:
     doc_ids = list(entries.keys())
     corpus_tokens = [entries[doc_id] for doc_id in doc_ids]
     bm25 = BM25Okapi(corpus_tokens)
-    dump_index(bm25, doc_ids)
-    console.print(f"[green]Built BM25 index with {len(doc_ids)} documents[/green]")
+    pagerank = _build_pagerank(doc_ids)
+    dump_index(bm25, doc_ids, pagerank)
+    console.print(
+        f"[green]Built index with {len(doc_ids)} documents"
+        f" and PageRank boosts[/green]"
+    )
 
 
 if __name__ == "__main__":

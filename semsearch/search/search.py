@@ -4,11 +4,9 @@ from rank_bm25 import BM25Okapi
 
 from ..index.nlp import preprocess
 from ..storage import init_db
-from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
-from ..storage.page import normalize_url
 from .index_store import load_index
-from .ranking import apply_ranking, compute_pagerank_boosts
+from .ranking import apply_ranking
 
 
 class SearchResult:
@@ -20,8 +18,8 @@ class SearchResult:
         self.total_docs = total_docs
 
 
-def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
-    bm25, doc_ids = load_index()
+def _load_search_data() -> tuple[BM25Okapi, list[str], dict[str, float], dict[str, dict[str, str]]]:
+    bm25, doc_ids, pagerank = load_index()
     docs = {
         p.url_hash: {
             "url": p.url,
@@ -45,7 +43,7 @@ def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
             Page.language,
         )
     }
-    return bm25, doc_ids, docs
+    return bm25, doc_ids, pagerank, docs
 
 
 _index_loaded = False
@@ -55,23 +53,12 @@ _docs: dict[str, dict[str, str]] = {}
 _pagerank: dict[str, float] = {}
 
 
-def _load_pagerank(doc_ids: list[str], docs: dict[str, dict[str, str]]) -> dict[str, float]:
-    url_to_doc = {
-        normalize_url(doc["url"]): doc_id
-        for doc_id, doc in docs.items()
-        if doc.get("url")
-    }
-    links = [(link.source_hash, link.target_url) for link in Link.select()]
-    return compute_pagerank_boosts(doc_ids, url_to_doc, links)
-
-
 def _ensure_index() -> None:
     global _bm25, _doc_ids, _docs, _pagerank, _index_loaded
     if _index_loaded:
         return
     init_db()
-    _bm25, _doc_ids, _docs = _load_index()
-    _pagerank = _load_pagerank(_doc_ids, _docs)
+    _bm25, _doc_ids, _pagerank, _docs = _load_search_data()
     _index_loaded = True
 
 
