@@ -54,6 +54,8 @@ def iter_page_metas() -> Iterator[dict]:
     for page in Page.select().iterator():
         yield {
             "url": page.url,
+            "urlHash": page.url_hash,
             "lastFetchedAt": page.fetched_at,
             "contentHash": page.content_hash,
+            "indexedContentHash": page.indexed_content_hash or "",
         }

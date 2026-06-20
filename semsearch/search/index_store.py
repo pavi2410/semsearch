@@ -14,6 +14,16 @@ def dump_index(bm25: BM25Okapi, doc_ids: list[str]) -> None:
         pickle.dump({"bm25": bm25, "doc_ids": doc_ids}, f)
 
 
+def load_previous_doc_ids() -> list[str]:
+    if not _INDEX_FILE.exists():
+        return []
+    try:
+        _, doc_ids = load_index()
+    except (OSError, EOFError, KeyError, pickle.UnpicklingError):
+        return []
+    return doc_ids
+
+
 def load_index() -> tuple[BM25Okapi, list[str]]:
     with open(_INDEX_FILE, "rb") as f:
         data = pickle.load(f)

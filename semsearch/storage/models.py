@@ -19,6 +19,7 @@ _PAGE_COLUMNS = {
     "body_excerpt": "TEXT",
     "jsonld_types": "TEXT",
     "language": "TEXT",
+    "indexed_content_hash": "TEXT",
 }
 
 # Async db used by the crawler (inside asyncio event loop)
@@ -45,13 +46,13 @@ def migrate_schema() -> None:
         if column not in page_cols:
             sync_db.execute_sql(f"ALTER TABLE pages ADD COLUMN {column} {sql_type}")
 
-    sync_db.create_tables([SyncLink], safe=True)
+    sync_db.create_tables([SyncLink, SyncTokenCache], safe=True)
 
 
 def init_db(path: Path = _DB_PATH) -> None:
     """Initialise the sync database. Used by indexer, searcher, and migrate."""
     sync_db.init(_db_path_str(path), pragmas=_PRAGMAS)
-    sync_db.create_tables([SyncPage, SyncBlock, SyncLink], safe=True)
+    sync_db.create_tables([SyncPage, SyncBlock, SyncLink, SyncTokenCache], safe=True)
     migrate_schema()
 
 
@@ -82,6 +83,7 @@ class Page(BaseModel):
     body_excerpt = TextField(null=True)
     jsonld_types = TextField(null=True)
     language = TextField(null=True)
+    indexed_content_hash = TextField(null=True)
 
     class Meta:
         table_name = "pages"
@@ -123,6 +125,7 @@ class SyncPage(Model):
     body_excerpt = TextField(null=True)
     jsonld_types = TextField(null=True)
     language = TextField(null=True)
+    indexed_content_hash = TextField(null=True)
 
     class Meta:
         table_name = "pages"
@@ -150,3 +153,12 @@ class SyncLink(Model):
         database = sync_db
         primary_key = False
         indexes = ((("source_hash", "target_url"), True),)
+
+
+class SyncTokenCache(Model):
+    content_hash = TextField(primary_key=True)
+    tokens = TextField()
+
+    class Meta:
+        table_name = "token_cache"
+        database = sync_db
