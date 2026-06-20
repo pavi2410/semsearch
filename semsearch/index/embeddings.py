@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -6,6 +7,8 @@ from fastembed import TextEmbedding
 from ..crawl.metadata import PageMetadata
 from .chunking import chunk_text
 from .embedding_model import DEFAULT_MODEL, load_embedder
+
+DEFAULT_EMBED_BATCH_SIZE = 256
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,30 @@ def build_document_text(page_meta: PageMetadata) -> str:
     )
 
 
+def embed_text_chunks(
+    chunks: list[str],
+    embedder: TextEmbedding,
+    *,
+    batch_size: int = DEFAULT_EMBED_BATCH_SIZE,
+    parallel: int | None = None,
+) -> np.ndarray:
+    if not chunks:
+        return np.empty((0, 0), dtype=np.float32)
+
+    workers = parallel if parallel is not None else os.cpu_count()
+    vectors = np.asarray(
+        list(
+            embedder.embed(
+                chunks,
+                batch_size=batch_size,
+                parallel=workers,
+            )
+        ),
+        dtype=np.float32,
+    )
+    return _normalize_rows(vectors)
+
+
 def embed_document(
     page_meta: PageMetadata,
     *,
@@ -39,8 +66,7 @@ def embed_document(
         return None
 
     embedder = model or load_embedder()
-    vectors = np.asarray(list(embedder.embed(chunks)), dtype=np.float32)
-    vectors = _normalize_rows(vectors)
+    vectors = embed_text_chunks(chunks, embedder)
     return DocumentEmbedding(chunks=chunks, vectors=vectors)
 
 

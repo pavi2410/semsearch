@@ -22,9 +22,18 @@ from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
 from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
-from .embeddings import DocumentEmbedding, EmbeddingIndex, build_embedding_index, embed_document
+from .embeddings import (
+    DocumentEmbedding,
+    EmbeddingIndex,
+    build_document_text,
+    build_embedding_index,
+    chunk_text,
+    embed_text_chunks,
+)
 from .embedding_model import is_model_installed, load_embedder
 from .nlp import preprocess
+
+DOCUMENT_EMBED_BATCH = 64
 
 
 @dataclass
@@ -94,6 +103,67 @@ def _process_page(meta: dict) -> tuple[str, str, str, PageMetadata, list[str]] |
     return url, doc_id, content_hash, page_meta, tokens
 
 
+def _extract_document_chunks(meta: dict) -> tuple[str, str, list[str]] | None:
+    url = meta["url"]
+    content_hash = meta["contentHash"]
+    doc_id = meta["urlHash"]
+    html = read_content(content_hash)
+    if not is_indexable_page(url, html):
+        return None
+    page_meta = extract_page_metadata(html, url)
+    chunks = chunk_text(build_document_text(page_meta))
+    if not chunks:
+        return None
+    return doc_id, content_hash, chunks
+
+
+def _extract_chunks_parallel(pending: list[dict]) -> list[tuple[str, str, list[str]]]:
+    if not pending:
+        return []
+
+    extracted: list[tuple[str, str, list[str]]] = []
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
+        futures = [pool.submit(_extract_document_chunks, meta) for meta in pending]
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                extracted.append(result)
+    return extracted
+
+
+def _embed_extracted_documents(
+    extracted: list[tuple[str, str, list[str]]],
+    *,
+    embedder: TextEmbedding,
+    progress,
+    task,
+) -> tuple[dict[str, DocumentEmbedding], int]:
+    doc_embeddings: dict[str, DocumentEmbedding] = {}
+    embedded = 0
+    workers = os.cpu_count()
+
+    for batch_start in range(0, len(extracted), DOCUMENT_EMBED_BATCH):
+        batch = extracted[batch_start : batch_start + DOCUMENT_EMBED_BATCH]
+        all_chunks: list[str] = []
+        spans: list[tuple[str, str, list[str], int, int]] = []
+
+        for doc_id, content_hash, chunks in batch:
+            start = len(all_chunks)
+            all_chunks.extend(chunks)
+            spans.append((doc_id, content_hash, chunks, start, len(all_chunks)))
+
+        vectors = embed_text_chunks(all_chunks, embedder, parallel=workers)
+        for doc_id, content_hash, chunks, start, end in spans:
+            doc_vectors = vectors[start:end]
+            save_embedding(content_hash, chunks, doc_vectors)
+            doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=doc_vectors)
+            embedded += 1
+
+        progress.advance(task, len(batch))
+
+    return doc_embeddings, embedded
+
+
 def _page_update_fields(page_meta: PageMetadata, content_hash: str) -> dict[str, str]:
     return {
         "title": page_meta.title,
@@ -141,17 +211,14 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
     return compute_pagerank_boosts(doc_ids, url_to_doc, links)
 
 
-def _build_embeddings(
+def _load_cached_embeddings(
     doc_ids: list[str],
     *,
-    embedder: TextEmbedding,
     force: bool,
-    progress,
-    task,
-) -> tuple[EmbeddingIndex | None, int, int]:
+) -> tuple[dict[str, DocumentEmbedding], list[dict], int]:
     doc_embeddings: dict[str, DocumentEmbedding] = {}
+    pending: list[dict] = []
     cached = 0
-    embedded = 0
 
     for doc_id in doc_ids:
         page = Page.get_by_id(doc_id)
@@ -161,24 +228,12 @@ def _build_embeddings(
                 chunks, vectors = cached_embedding
                 doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
                 cached += 1
-                progress.advance(task)
                 continue
+        pending.append(
+            {"urlHash": doc_id, "url": page.url, "contentHash": page.content_hash}
+        )
 
-        html = read_content(page.content_hash)
-        if not is_indexable_page(page.url, html):
-            progress.advance(task)
-            continue
-        page_meta = extract_page_metadata(html, page.url)
-        doc_embedding = embed_document(page_meta, model=embedder)
-        if doc_embedding is None:
-            progress.advance(task)
-            continue
-        save_embedding(page.content_hash, doc_embedding.chunks, doc_embedding.vectors)
-        doc_embeddings[doc_id] = doc_embedding
-        embedded += 1
-        progress.advance(task)
-
-    return build_embedding_index(doc_ids, doc_embeddings), cached, embedded
+    return doc_embeddings, pending, cached
 
 
 def _run_process_pool(
@@ -299,22 +354,43 @@ def main(argv: list[str] | None = None) -> None:
     if is_model_installed():
         console.print("[dim]Loading embedding model...[/dim]")
         embedder = load_embedder()
-        embedding_progress = make_determinate_progress()
-        with embedding_progress:
-            embedding_task = embedding_progress.add_task(
-                "Building semantic embeddings",
-                total=len(doc_ids),
-            )
-            embedding_index, cached, embedded = _build_embeddings(
-                doc_ids,
-                embedder=embedder,
-                force=args.force,
-                progress=embedding_progress,
-                task=embedding_task,
-            )
+
+        doc_embeddings, pending, cached = _load_cached_embeddings(
+            doc_ids,
+            force=args.force,
+        )
+
+        extracted: list[tuple[str, str, list[str]]] = []
+        skipped_extract = 0
+        if pending:
+            console.print(f"[dim]Extracting text from {len(pending)} pages...[/dim]")
+            extracted = _extract_chunks_parallel(pending)
+            skipped_extract = len(pending) - len(extracted)
+
+        embedded = 0
+        if extracted:
+            console.print(f"[dim]Embedding {len(extracted)} pages...[/dim]")
+            embedding_progress = make_determinate_progress()
+            with embedding_progress:
+                embedding_task = embedding_progress.add_task(
+                    "Building semantic embeddings",
+                    total=len(doc_ids),
+                )
+                embedding_progress.advance(embedding_task, cached + skipped_extract)
+                new_embeddings, embedded = _embed_extracted_documents(
+                    extracted,
+                    embedder=embedder,
+                    progress=embedding_progress,
+                    task=embedding_task,
+                )
+                doc_embeddings.update(new_embeddings)
+        elif cached:
+            console.print("[dim]All embeddings loaded from cache[/dim]")
+
         console.print(
             f"[dim]{cached} embedding cache hits, {embedded} embedded[/dim]"
         )
+        embedding_index = build_embedding_index(doc_ids, doc_embeddings)
     else:
         console.print(
             "[dim]Semantic embeddings skipped — run `uv run setup-models` to enable them[/dim]"
