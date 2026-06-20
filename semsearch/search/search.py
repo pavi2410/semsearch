@@ -6,6 +6,7 @@ from ..index.nlp import preprocess
 from ..storage import init_db
 from ..storage.models import SyncPage as Page
 from .index_store import load_index
+from .ranking import apply_ranking
 
 
 class SearchResult:
@@ -70,7 +71,12 @@ def search(query: str) -> SearchResult:
     scores = _bm25.get_scores(query_tokens)  # type: ignore[union-attr]
     end = time.perf_counter_ns()
 
-    results = [(did, s) for did, s in zip(_doc_ids, scores) if s > 0]
+    results = []
+    for doc_id, bm25_score in zip(_doc_ids, scores):
+        if bm25_score <= 0:
+            continue
+        doc = _docs.get(doc_id, {})
+        results.append((doc_id, apply_ranking(bm25_score, doc)))
     results.sort(key=lambda x: x[1], reverse=True)
 
     return SearchResult(
