@@ -17,7 +17,7 @@ from ..core.tui_util import (
 from ..storage import async_init_db, read_content, read_page_meta, save_page
 from ..storage.page import normalize_url
 from .blocks import BlockList
-from .html_utils import extract_links
+from .metadata import extract_outbound_links
 from .robots import USER_AGENT, RobotsCache
 from .sitemap import SitemapLoader
 
@@ -142,7 +142,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             ctx.progress.print(f"  Skip fetching {url}")
             ctx.stats.inc("skipped")
             html = read_content(meta["contentHash"])
-            return extract_links(html, url)
+            return extract_outbound_links(html, url)
 
         is_new_page = meta is None
         domain = urlparse(url).hostname or url
@@ -202,7 +202,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             else:
                 ctx.progress.print(f"  Saved {url}")
 
-            return extract_links(html, url)
+            return extract_outbound_links(html, url)
     finally:
         ctx.stats.inc("in_flight", by=-1)
 

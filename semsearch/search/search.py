@@ -20,8 +20,25 @@ class SearchResult:
 def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
     bm25, doc_ids = load_index()
     docs = {
-        p.url_hash: {"url": p.url, "title": p.title or ""}
-        for p in Page.select(Page.url_hash, Page.url, Page.title)
+        p.url_hash: {
+            "url": p.url,
+            "title": p.title or "",
+            "description": p.description or "",
+            "body_excerpt": p.body_excerpt or "",
+            "published_at": p.published_at or "",
+            "modified_at": p.modified_at or "",
+            "fetched_at": p.fetched_at or "",
+        }
+        for p in Page.select(
+            Page.url_hash,
+            Page.url,
+            Page.title,
+            Page.description,
+            Page.body_excerpt,
+            Page.published_at,
+            Page.modified_at,
+            Page.fetched_at,
+        )
     }
     return bm25, doc_ids, docs
 

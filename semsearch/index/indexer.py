@@ -7,20 +7,54 @@ from rank_bm25 import BM25Okapi
 from rich.console import Console
 
 from ..core.tui_util import make_determinate_progress
-from ..crawl.html_utils import extract_metadata
+from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index
 from ..storage import init_db, iter_page_metas, read_content, url_hash
+from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
 from .nlp import preprocess
 
 
-def _process_page(meta: dict) -> tuple[str, str, str, list[str]]:
+def _process_page(meta: dict) -> tuple[str, str, PageMetadata, list[str]]:
     url = meta["url"]
     html = read_content(meta["contentHash"])
-    title, text = extract_metadata(html)
+    page_meta = extract_page_metadata(html, url)
     doc_id = url_hash(url)
-    tokens = preprocess(f"{title} {text}")
-    return (meta["url"], doc_id, title, tokens)
+    index_text = " ".join(
+        part
+        for part in (page_meta.title, page_meta.description, page_meta.body_text)
+        if part
+    )
+    tokens = preprocess(index_text)
+    return url, doc_id, page_meta, tokens
+
+
+def _page_update_fields(page_meta: PageMetadata) -> dict[str, str]:
+    return {
+        "title": page_meta.title,
+        "description": page_meta.description,
+        "canonical_url": page_meta.canonical_url,
+        "og_title": page_meta.og_title,
+        "og_description": page_meta.og_description,
+        "published_at": page_meta.published_at,
+        "modified_at": page_meta.modified_at,
+        "body_excerpt": page_meta.body_excerpt,
+        "jsonld_types": ",".join(page_meta.jsonld_types),
+    }
+
+
+def _save_links(doc_id: str, outbound_links: list[str]) -> None:
+    Link.delete().where(Link.source_hash == doc_id).execute()
+    if not outbound_links:
+        return
+    Link.insert_many(
+        [{"source_hash": doc_id, "target_url": target} for target in outbound_links]
+    ).execute()
+
+
+def _persist_page(doc_id: str, page_meta: PageMetadata) -> None:
+    Page.update(**_page_update_fields(page_meta)).where(Page.url_hash == doc_id).execute()
+    _save_links(doc_id, page_meta.outbound_links)
 
 
 def main() -> None:
@@ -46,9 +80,9 @@ def main() -> None:
             futures = [pool.submit(_process_page, meta) for meta in metas]
             try:
                 for future in as_completed(futures):
-                    url, doc_id, title, tokens = future.result()
+                    url, doc_id, page_meta, tokens = future.result()
                     entries[doc_id] = (url, tokens)
-                    Page.update(title=title).where(Page.url_hash == doc_id).execute()
+                    _persist_page(doc_id, page_meta)
                     progress.advance(task)
             except KeyboardInterrupt:
                 console.print("[yellow]Shutting down...[/yellow]")
@@ -61,9 +95,9 @@ def main() -> None:
                 "[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]"
             )
             for meta in metas:
-                url, doc_id, title, tokens = _process_page(meta)
+                url, doc_id, page_meta, tokens = _process_page(meta)
                 entries[doc_id] = (url, tokens)
-                Page.update(title=title).where(Page.url_hash == doc_id).execute()
+                _persist_page(doc_id, page_meta)
                 progress.advance(task)
         else:
             pool.shutdown()

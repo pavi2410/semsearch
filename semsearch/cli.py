@@ -6,8 +6,10 @@ from rich.style import Style
 from rich.text import Text
 
 from .search.search import get_docs, search
+from .search.snippet import make_snippet
 
 HIGHLIGHT_STYLE = Style(bgcolor="yellow")
+RESULT_LIMIT = 10
 
 
 def _format_display_url(url: str) -> tuple[str, str]:
@@ -29,6 +31,19 @@ def _format_url_display(display_url: str, link_url: str) -> Text:
     return url_display
 
 
+def _highlight_text(text: str, query: str) -> Text:
+    highlighted = Text(text)
+    highlighted.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
+    return highlighted
+
+
+def _result_snippet(doc: dict[str, str], query: str) -> str:
+    return make_snippet(
+        doc.get("body_excerpt") or doc.get("description") or "",
+        query,
+    )
+
+
 def display_results(
     query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int
 ) -> None:
@@ -40,24 +55,22 @@ def display_results(
     )
     rprint()
 
-    for doc_id, score in results[:3]:
+    for doc_id, score in results[:RESULT_LIMIT]:
         doc = docs.get(doc_id, {})
         title = doc.get("title", "").strip() or "Untitled page"
         link_url, display_url = _format_display_url(doc.get("url", ""))
+        snippet = _result_snippet(doc, query)
 
-        highlighted_title = Text(title)
-        highlighted_title.highlight_words(
-            query.split(), HIGHLIGHT_STYLE, case_sensitive=False
-        )
+        highlighted_title = _highlight_text(title, query)
         score_str = f"({score:.4f})"
 
         url_display = _format_url_display(display_url, link_url)
-        url_display.highlight_words(
-            query.split(), HIGHLIGHT_STYLE, case_sensitive=False
-        )
+        url_display.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
 
         rprint(highlighted_title, f"[dim]{score_str}[/dim]")
         rprint("\u21b3", url_display)
+        if snippet:
+            rprint(_highlight_text(snippet, query))
         rprint()
 
 
