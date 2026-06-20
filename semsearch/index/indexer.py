@@ -7,6 +7,7 @@ from rank_bm25 import BM25Okapi
 from rich.console import Console
 
 from ..core.tui_util import make_determinate_progress
+from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index
 from ..storage import init_db, iter_page_metas, read_content, url_hash
@@ -15,9 +16,11 @@ from ..storage.models import SyncPage as Page
 from .nlp import preprocess
 
 
-def _process_page(meta: dict) -> tuple[str, str, PageMetadata, list[str]]:
+def _process_page(meta: dict) -> tuple[str, str, PageMetadata, list[str]] | None:
     url = meta["url"]
     html = read_content(meta["contentHash"])
+    if not is_indexable_page(url, html):
+        return None
     page_meta = extract_page_metadata(html, url)
     doc_id = url_hash(url)
     index_text = " ".join(
@@ -80,10 +83,13 @@ def main() -> None:
             futures = [pool.submit(_process_page, meta) for meta in metas]
             try:
                 for future in as_completed(futures):
-                    url, doc_id, page_meta, tokens = future.result()
+                    result = future.result()
+                    progress.advance(task)
+                    if result is None:
+                        continue
+                    url, doc_id, page_meta, tokens = result
                     entries[doc_id] = (url, tokens)
                     _persist_page(doc_id, page_meta)
-                    progress.advance(task)
             except KeyboardInterrupt:
                 console.print("[yellow]Shutting down...[/yellow]")
                 interrupted = True
@@ -95,10 +101,13 @@ def main() -> None:
                 "[yellow]ProcessPoolExecutor failed, falling back to sequential indexing[/yellow]"
             )
             for meta in metas:
-                url, doc_id, page_meta, tokens = _process_page(meta)
+                result = _process_page(meta)
+                progress.advance(task)
+                if result is None:
+                    continue
+                url, doc_id, page_meta, tokens = result
                 entries[doc_id] = (url, tokens)
                 _persist_page(doc_id, page_meta)
-                progress.advance(task)
         else:
             pool.shutdown()
 

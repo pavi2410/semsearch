@@ -8,6 +8,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, SoupStrainer, XMLParsedAsHTMLWarning
 
+from .content_filter import is_fetchable_document_url
+
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 _HEAD = SoupStrainer("head")
@@ -207,7 +209,7 @@ def extract_outbound_links(html: str, base_url: str) -> list[str]:
         if parsed.scheme not in {"http", "https"}:
             continue
         normalized = parsed._replace(fragment="").geturl()
-        if normalized not in seen:
+        if normalized not in seen and is_fetchable_document_url(normalized):
             seen.add(normalized)
             links.append(normalized)
     return links

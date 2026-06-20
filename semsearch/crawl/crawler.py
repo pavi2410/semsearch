@@ -17,6 +17,7 @@ from ..core.tui_util import (
 from ..storage import async_init_db, read_content, read_page_meta, save_page
 from ..storage.page import normalize_url
 from .blocks import BlockList
+from .content_filter import is_fetchable_document_url, is_indexable_page
 from .metadata import extract_outbound_links
 from .robots import USER_AGENT, RobotsCache
 from .sitemap import SitemapLoader
@@ -83,6 +84,8 @@ async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
     """Add a URL to the queue if not visited. On new domains, bulk-enqueue sitemap URLs."""
     if url in ctx.visited:
         return
+    if not is_fetchable_document_url(url):
+        return
     ctx.visited.add(url)
     ctx.stats.inc("visited")
     await ctx.queue.put(url)
@@ -97,7 +100,7 @@ async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
         ctx.stats.inc("sitemap_urls", by=len(page_urls))
         for page_url in page_urls:
             norm = normalize_url(page_url)
-            if norm not in ctx.visited:
+            if norm not in ctx.visited and is_fetchable_document_url(norm):
                 ctx.visited.add(norm)
                 ctx.stats.inc("visited")
                 await ctx.queue.put(norm)
@@ -142,7 +145,11 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             ctx.progress.print(f"  Skip fetching {url}")
             ctx.stats.inc("skipped")
             html = read_content(meta["contentHash"])
-            return extract_outbound_links(html, url)
+            return [
+                link
+                for link in extract_outbound_links(html, url)
+                if is_fetchable_document_url(link)
+            ]
 
         is_new_page = meta is None
         domain = urlparse(url).hostname or url
@@ -188,6 +195,16 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
 
             ctx.stats.inc("req_2xx")
             ctx.stats.inc("req_3xx", by=len(resp.history))
+
+            content_type = resp.headers.get("Content-Type")
+            if not is_indexable_page(url, html, content_type):
+                ctx.progress.print(
+                    f"  [yellow]Skipping non-HTML[/yellow] {url}"
+                    f" ({content_type or 'unknown type'})"
+                )
+                ctx.stats.inc("skipped")
+                return None
+
             ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
             now = _now()
             save_page(url, html, now)
@@ -202,7 +219,11 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             else:
                 ctx.progress.print(f"  Saved {url}")
 
-            return extract_outbound_links(html, url)
+            return [
+                link
+                for link in extract_outbound_links(html, url)
+                if is_fetchable_document_url(link)
+            ]
     finally:
         ctx.stats.inc("in_flight", by=-1)
 
