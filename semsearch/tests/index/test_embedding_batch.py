@@ -6,12 +6,12 @@ def _doc(name: str, chunk_count: int) -> tuple[str, str, list[str]]:
 
 
 def test_take_embed_batch_splits_on_chunk_budget():
-    ready = [_doc("a", 20), _doc("b", 20), _doc("c", 20), _doc("d", 5)]
+    ready = [_doc("a", 30), _doc("b", 30), _doc("c", 37), _doc("d", 5)]
 
     first = take_embed_batch(ready, chunk_budget=96, solo_doc_chunks=32)
 
-    assert first == [_doc("a", 20), _doc("b", 20), _doc("c", 20)]
-    assert ready == [_doc("d", 5)]
+    assert first == [_doc("a", 30), _doc("b", 30)]
+    assert ready == [_doc("c", 37), _doc("d", 5)]
 
 
 def test_take_embed_batch_embeds_large_docs_solo():

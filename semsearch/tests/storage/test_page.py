@@ -1,5 +1,24 @@
 from semsearch.search.dedup import dedupe_results
+from semsearch.search.search import ScoreBreakdown, SearchHit
 from semsearch.storage.page import canonical_key, normalize_url
+
+
+def _hit(doc_id: str, score: float) -> SearchHit:
+    breakdown = ScoreBreakdown(
+        bm25=score,
+        semantic=0.0,
+        base=score,
+        base_source="bm25",
+        recency=1.0,
+        https=1.0,
+        pagerank=1.0,
+        metadata=1.0,
+        title=1.0,
+        fusion=0.0,
+        fusion_multiplier=1.0,
+        final=score,
+    )
+    return SearchHit(doc_id=doc_id, score=score, breakdown=breakdown)
 
 
 def test_normalize_url_strips_trailing_slash():
@@ -44,11 +63,11 @@ def test_dedupe_results_keeps_highest_score_per_canonical_url():
         },
     }
     results = [
-        ("variant", 9.0),
-        ("canonical", 8.0),
-        ("other", 7.0),
+        _hit("variant", 9.0),
+        _hit("canonical", 8.0),
+        _hit("other", 7.0),
     ]
 
     deduped = dedupe_results(results, docs)
 
-    assert deduped == [("variant", 9.0), ("other", 7.0)]
+    assert [hit.doc_id for hit in deduped] == ["variant", "other"]

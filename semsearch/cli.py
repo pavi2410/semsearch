@@ -6,7 +6,7 @@ from rich import print as rprint
 from rich.style import Style
 from rich.text import Text
 
-from .search.search import get_docs, search
+from .search.search import SearchHit, format_score_breakdown, get_docs, search
 from .search.snippet import make_snippet
 
 HIGHLIGHT_STYLE = Style(bgcolor="yellow")
@@ -25,9 +25,9 @@ def _format_url_display(display_url: str, link_url: str) -> Text:
     host_start = display_url.index(hostname)
     host_end = host_start + len(hostname)
     url_display = (
-        Text(display_url[:host_start])
-        .append(display_url[host_start:host_end], style=Style(italic=True, bold=True))
-        .append(display_url[host_end:])
+        Text(display_url[:host_start], style=Style(dim=True))
+        .append(display_url[host_start:host_end], style=Style(italic=True, bold=True, dim=False))
+        .append(display_url[host_end:], style=Style(dim=True))
     )
     url_display.stylize(Style(link=link_url))
     return url_display
@@ -67,7 +67,7 @@ def _looks_like_nav_chrome(text: str) -> bool:
 
 
 def display_results(
-    query: str, results: list[tuple[str, float]], query_time_ms: float, total_docs: int
+    query: str, results: list[SearchHit], query_time_ms: float, total_docs: int
 ) -> None:
     docs = get_docs()
     rprint()
@@ -77,24 +77,25 @@ def display_results(
     )
     rprint()
 
-    for doc_id, score in results[:RESULT_LIMIT]:
-        doc = docs.get(doc_id, {})
+    for hit in results[:RESULT_LIMIT]:
+        doc = docs.get(hit.doc_id, {})
         title = doc.get("title", "").strip() or "Untitled page"
         link_url, display_url = _format_display_url(doc.get("url", ""))
         snippet = _result_snippet(doc, query)
 
         highlighted_title = _highlight_text(title, query)
-        score_str = f"({score:.4f})"
+        score_detail = format_score_breakdown(hit.breakdown)
         language = doc.get("language", "").strip()
         language_str = f" [{language}]" if language else ""
 
         url_display = _format_url_display(display_url, link_url)
         _apply_query_highlights(url_display, query)
 
-        rprint(highlighted_title, f"[dim]{score_str}{language_str}[/dim]")
+        rprint(highlighted_title)
         rprint("\u21b3", url_display)
         if snippet:
             rprint(_highlight_text(snippet, query))
+        rprint(f"[dim]{score_detail}{language_str}[/dim]")
         rprint()
 
 
