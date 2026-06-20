@@ -72,11 +72,13 @@ def display_results(
 
         highlighted_title = _highlight_text(title, query)
         score_str = f"({score:.4f})"
+        language = doc.get("language", "").strip()
+        language_str = f" [{language}]" if language else ""
 
         url_display = _format_url_display(display_url, link_url)
         url_display.highlight_words(query.split(), HIGHLIGHT_STYLE, case_sensitive=False)
 
-        rprint(highlighted_title, f"[dim]{score_str}[/dim]")
+        rprint(highlighted_title, f"[dim]{score_str}{language_str}[/dim]")
         rprint("\u21b3", url_display)
         if snippet:
             rprint(_highlight_text(snippet, query))

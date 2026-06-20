@@ -18,6 +18,7 @@ _PAGE_COLUMNS = {
     "modified_at": "TEXT",
     "body_excerpt": "TEXT",
     "jsonld_types": "TEXT",
+    "language": "TEXT",
 }
 
 # Async db used by the crawler (inside asyncio event loop)
@@ -80,6 +81,7 @@ class Page(BaseModel):
     modified_at = TextField(null=True)
     body_excerpt = TextField(null=True)
     jsonld_types = TextField(null=True)
+    language = TextField(null=True)
 
     class Meta:
         table_name = "pages"
@@ -120,6 +122,7 @@ class SyncPage(Model):
     modified_at = TextField(null=True)
     body_excerpt = TextField(null=True)
     jsonld_types = TextField(null=True)
+    language = TextField(null=True)
 
     class Meta:
         table_name = "pages"

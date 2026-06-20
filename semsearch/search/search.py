@@ -31,6 +31,7 @@ def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
             "published_at": p.published_at or "",
             "modified_at": p.modified_at or "",
             "fetched_at": p.fetched_at or "",
+            "language": p.language or "",
         }
         for p in Page.select(
             Page.url_hash,
@@ -41,6 +42,7 @@ def _load_index() -> tuple[BM25Okapi, list[str], dict[str, dict[str, str]]]:
             Page.published_at,
             Page.modified_at,
             Page.fetched_at,
+            Page.language,
         )
     }
     return bm25, doc_ids, docs

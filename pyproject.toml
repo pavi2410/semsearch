@@ -9,6 +9,7 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "greenlet>=3.5.1",
     "httpx>=0.28.1",
+    "langdetect>=1.0.9",
     "lxml>=6.1.1",
     "peewee[aiosqlite]>=4.0",
     "python-levenshtein>=0.27.3",

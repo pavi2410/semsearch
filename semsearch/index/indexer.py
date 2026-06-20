@@ -43,6 +43,7 @@ def _page_update_fields(page_meta: PageMetadata) -> dict[str, str]:
         "modified_at": page_meta.modified_at,
         "body_excerpt": page_meta.body_excerpt,
         "jsonld_types": ",".join(page_meta.jsonld_types),
+        "language": page_meta.language,
     }
 
 

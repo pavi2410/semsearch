@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup, SoupStrainer, XMLParsedAsHTMLWarning
 
 from .content_filter import is_fetchable_document_url
+from .language import extract_language
 from .main_content import extract_main_text
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
@@ -44,6 +45,7 @@ class PageMetadata:
     body_excerpt: str = ""
     outbound_links: list[str] = field(default_factory=list)
     jsonld_types: list[str] = field(default_factory=list)
+    language: str = ""
 
 
 def _unescape(text: str) -> str:
@@ -264,4 +266,5 @@ def extract_page_metadata(html: str, page_url: str) -> PageMetadata:
         body_excerpt=excerpt,
         outbound_links=extract_outbound_links(html, page_url),
         jsonld_types=jsonld_types,
+        language=extract_language(html, body_text),
     )
