@@ -17,11 +17,25 @@ Written in Python and managed with [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
-Initialize the database (first run only, or after schema changes):
+### One-time setup
+
+Initialize the database and download the local embedding model used for semantic search:
 
 ```sh
 uv run migrate
+uv run setup-models
 ```
+
+`setup-models` downloads `Qdrant/all-MiniLM-L6-v2-onnx` (~90MB) into `data/models/fastembed/`. This is a one-time step unless you delete that folder or pass `--force`.
+
+Optional but recommended for faster, more reliable downloads:
+
+```sh
+export HF_TOKEN=hf_...   # https://huggingface.co/settings/tokens
+uv run setup-models
+```
+
+Indexing automatically builds semantic embeddings when the model is installed. Without it, `uv run index` still builds the BM25 and PageRank index.
 
 ### Usage
 
@@ -67,6 +81,9 @@ The search index is split under `data/index/`:
 | `manifest.json` | Index version, build time, document IDs |
 | `pagerank.json` | Precomputed PageRank boosts per document |
 | `bm25.pkl` | BM25Okapi corpus |
+| `embeddings.pkl` | Chunk embeddings for hybrid semantic search |
+
+Semantic embeddings use the local ONNX model installed by `uv run setup-models`.
 
 ### 3. Searching
 
@@ -75,6 +92,7 @@ Queries use the same NLP preprocessing as the index. Final score combines:
 | Signal | Notes |
 |--------|-------|
 | **BM25** | Bag-of-words relevance over title + description + body |
+| **Semantic** | Local MiniLM embeddings fused with BM25 via reciprocal rank fusion |
 | **Title match** | Extra boost when the query phrase or terms appear in the title |
 | **PageRank** | Link-graph popularity (1.0–1.3×, log-scaled) |
 | **Recency** | Fresher pages score higher via publish/modified/fetched timestamps |
@@ -96,7 +114,9 @@ semsearch/
 │   └── content_filter.py  # skip non-indexable content
 ├── index/
 │   ├── indexer.py         # BM25 + PageRank index builder
+│   ├── embedding_model.py # local ONNX model load
 │   └── nlp.py             # tokenization pipeline
+├── model_download.py      # Hugging Face model download for setup-models
 ├── search/
 │   ├── search.py          # query + scoring
 │   ├── ranking.py         # PageRank, recency, HTTPS, title boosts

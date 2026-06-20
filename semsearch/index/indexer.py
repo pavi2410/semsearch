@@ -6,7 +6,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 
-from fastembed import TextEmbedding
 from rank_bm25 import BM25Okapi
 from rich.console import Console
 
@@ -21,7 +20,8 @@ from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
 from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
-from .embeddings import DEFAULT_MODEL, DocumentEmbedding, build_embedding_index, embed_document
+from .embeddings import DocumentEmbedding, build_embedding_index, embed_document
+from .embedding_model import is_model_installed, load_embedder
 from .nlp import preprocess
 
 
@@ -145,7 +145,7 @@ def _build_embeddings(
     force: bool,
     console: Console,
 ):
-    embedder = TextEmbedding(model_name=DEFAULT_MODEL)
+    embedder = load_embedder()
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     cached = 0
     embedded = 0
@@ -287,7 +287,13 @@ def main(argv: list[str] | None = None) -> None:
     corpus_tokens = [entries[doc_id] for doc_id in doc_ids]
     bm25 = BM25Okapi(corpus_tokens)
     pagerank = _build_pagerank(doc_ids)
-    embedding_index = _build_embeddings(doc_ids, force=args.force, console=console)
+    embedding_index = None
+    if is_model_installed():
+        embedding_index = _build_embeddings(doc_ids, force=args.force, console=console)
+    else:
+        console.print(
+            "[dim]Semantic embeddings skipped — run `uv run setup-models` to enable them[/dim]"
+        )
     dump_index(bm25, doc_ids, pagerank, embedding_index)
     console.print(
         f"[green]Built index with {len(doc_ids)} documents"

@@ -5,8 +5,7 @@ from fastembed import TextEmbedding
 
 from ..crawl.metadata import PageMetadata
 from .chunking import chunk_text
-
-DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+from .embedding_model import DEFAULT_MODEL, load_embedder
 
 
 @dataclass(frozen=True)
@@ -39,7 +38,7 @@ def embed_document(
     if not chunks:
         return None
 
-    embedder = model or TextEmbedding(model_name=DEFAULT_MODEL)
+    embedder = model or load_embedder()
     vectors = np.asarray(list(embedder.embed(chunks)), dtype=np.float32)
     vectors = _normalize_rows(vectors)
     return DocumentEmbedding(chunks=chunks, vectors=vectors)
@@ -72,7 +71,7 @@ def build_embedding_index(
 
 
 def embed_query(query: str, *, model_name: str = DEFAULT_MODEL) -> np.ndarray:
-    embedder = TextEmbedding(model_name=model_name)
+    embedder = load_embedder(model_name=model_name)
     vector = np.asarray(next(embedder.embed([query])), dtype=np.float32)
     norm = np.linalg.norm(vector)
     if norm == 0:
