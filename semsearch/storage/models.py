@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from peewee import BooleanField, FloatField, Model, SqliteDatabase, TextField
+from peewee import BlobField, BooleanField, FloatField, Model, SqliteDatabase, TextField
 from playhouse.pwasyncio import AsyncSqliteDatabase
 
 _DB_PATH = Path("data") / "semsearch.db"
@@ -46,13 +46,13 @@ def migrate_schema() -> None:
         if column not in page_cols:
             sync_db.execute_sql(f"ALTER TABLE pages ADD COLUMN {column} {sql_type}")
 
-    sync_db.create_tables([SyncLink, SyncTokenCache], safe=True)
+    sync_db.create_tables([SyncLink, SyncTokenCache, SyncEmbeddingCache], safe=True)
 
 
 def init_db(path: Path = _DB_PATH) -> None:
     """Initialise the sync database. Used by indexer, searcher, and migrate."""
     sync_db.init(_db_path_str(path), pragmas=_PRAGMAS)
-    sync_db.create_tables([SyncPage, SyncBlock, SyncLink, SyncTokenCache], safe=True)
+    sync_db.create_tables([SyncPage, SyncBlock, SyncLink, SyncTokenCache, SyncEmbeddingCache], safe=True)
     migrate_schema()
 
 
@@ -161,4 +161,13 @@ class SyncTokenCache(Model):
 
     class Meta:
         table_name = "token_cache"
+        database = sync_db
+
+
+class SyncEmbeddingCache(Model):
+    content_hash = TextField(primary_key=True)
+    payload = BlobField()
+
+    class Meta:
+        table_name = "embedding_cache"
         database = sync_db

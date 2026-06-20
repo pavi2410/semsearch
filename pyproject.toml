@@ -7,10 +7,12 @@ requires-python = ">=3.14"
 dependencies = [
     "aiosqlite>=0.22.1",
     "beautifulsoup4>=4.15.0",
+    "fastembed>=0.8.0",
     "greenlet>=3.5.1",
     "httpx>=0.28.1",
     "langdetect>=1.0.9",
     "lxml>=6.1.1",
+    "numpy>=2.4.6",
     "peewee[aiosqlite]>=4.0",
     "python-levenshtein>=0.27.3",
     "rank-bm25>=0.2.2",

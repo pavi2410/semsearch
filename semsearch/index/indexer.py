@@ -6,6 +6,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 
+from fastembed import TextEmbedding
 from rank_bm25 import BM25Okapi
 from rich.console import Console
 
@@ -15,10 +16,12 @@ from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
 from ..storage import init_db, iter_page_metas, read_content, url_hash
+from ..storage.embedding_cache import load_embedding, save_embedding
 from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
 from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
+from .embeddings import DEFAULT_MODEL, DocumentEmbedding, build_embedding_index, embed_document
 from .nlp import preprocess
 
 
@@ -136,6 +139,42 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
     return compute_pagerank_boosts(doc_ids, url_to_doc, links)
 
 
+def _build_embeddings(
+    doc_ids: list[str],
+    *,
+    force: bool,
+    console: Console,
+):
+    embedder = TextEmbedding(model_name=DEFAULT_MODEL)
+    doc_embeddings: dict[str, DocumentEmbedding] = {}
+    cached = 0
+    embedded = 0
+
+    for doc_id in doc_ids:
+        page = Page.get_by_id(doc_id)
+        if not force:
+            cached_embedding = load_embedding(page.content_hash)
+            if cached_embedding is not None:
+                chunks, vectors = cached_embedding
+                doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
+                cached += 1
+                continue
+
+        html = read_content(page.content_hash)
+        if not is_indexable_page(page.url, html):
+            continue
+        page_meta = extract_page_metadata(html, page.url)
+        doc_embedding = embed_document(page_meta, model=embedder)
+        if doc_embedding is None:
+            continue
+        save_embedding(page.content_hash, doc_embedding.chunks, doc_embedding.vectors)
+        doc_embeddings[doc_id] = doc_embedding
+        embedded += 1
+
+    console.print(f"[dim]{cached} embedding cache hits, {embedded} embedded[/dim]")
+    return build_embedding_index(doc_ids, doc_embeddings)
+
+
 def _run_process_pool(
     to_process: list[dict],
     entries: dict[str, list[str]],
@@ -248,10 +287,12 @@ def main(argv: list[str] | None = None) -> None:
     corpus_tokens = [entries[doc_id] for doc_id in doc_ids]
     bm25 = BM25Okapi(corpus_tokens)
     pagerank = _build_pagerank(doc_ids)
-    dump_index(bm25, doc_ids, pagerank)
+    embedding_index = _build_embeddings(doc_ids, force=args.force, console=console)
+    dump_index(bm25, doc_ids, pagerank, embedding_index)
     console.print(
         f"[green]Built index with {len(doc_ids)} documents"
-        f" and PageRank boosts[/green]"
+        f", PageRank boosts"
+        f"{', and semantic embeddings' if embedding_index else ''}[/green]"
     )
 
 
