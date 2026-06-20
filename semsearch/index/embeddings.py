@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -6,9 +5,10 @@ from fastembed import TextEmbedding
 
 from ..crawl.metadata import PageMetadata
 from .chunking import chunk_text
+from .embedding_config import EMBED_CHUNK_BATCH_SIZE, EMBED_PARALLEL
 from .embedding_model import DEFAULT_MODEL, load_embedder
 
-DEFAULT_EMBED_BATCH_SIZE = 256
+DEFAULT_EMBED_BATCH_SIZE = EMBED_CHUNK_BATCH_SIZE
 
 
 @dataclass(frozen=True)
@@ -42,15 +42,15 @@ def embed_text_chunks(
     if not chunks:
         return np.empty((0, 0), dtype=np.float32)
 
-    workers = parallel if parallel is not None else os.cpu_count()
+    workers = EMBED_PARALLEL if parallel is None else parallel
+    embed_kwargs: dict = {
+        "batch_size": batch_size,
+    }
+    if workers is not None:
+        embed_kwargs["parallel"] = workers
+
     vectors = np.asarray(
-        list(
-            embedder.embed(
-                chunks,
-                batch_size=batch_size,
-                parallel=workers,
-            )
-        ),
+        list(embedder.embed(chunks, **embed_kwargs)),
         dtype=np.float32,
     )
     return _normalize_rows(vectors)

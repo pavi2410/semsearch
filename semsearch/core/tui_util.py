@@ -34,7 +34,25 @@ def make_determinate_progress(unit: str = "doc/s") -> Progress:
         SpeedColumn(unit),
         TimeElapsedColumn(),
         TimeRemainingColumn(),
+        refresh_per_second=10,
     )
+
+
+def run_with_progress_refresh(progress: Progress, func, /, *args, **kwargs):
+    """Keep Rich progress timers alive while `func` blocks the main thread."""
+    stop = threading.Event()
+
+    def refresher() -> None:
+        while not stop.wait(0.1):
+            progress.refresh()
+
+    thread = threading.Thread(target=refresher, daemon=True)
+    thread.start()
+    try:
+        return func(*args, **kwargs)
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
 
 
 def make_indeterminate_progress(

@@ -2,7 +2,7 @@ import argparse
 import os
 from collections import Counter
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 
@@ -11,7 +11,7 @@ from rich.console import Console
 
 from fastembed import TextEmbedding
 
-from ..core.tui_util import make_determinate_progress
+from ..core.tui_util import make_determinate_progress, run_with_progress_refresh
 from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
@@ -30,10 +30,18 @@ from .embeddings import (
     chunk_text,
     embed_text_chunks,
 )
+from .embedding_batch import take_embed_batch
+from .embedding_config import (
+    EMBED_CHUNK_BUDGET,
+    EMBED_SOLO_DOC_CHUNKS,
+    EMBED_WAIT_TIMEOUT_SEC,
+    EXTRACT_PAGE_BATCH,
+    EXTRACT_POOL_RECYCLE,
+    EXTRACT_WORKERS,
+    MAX_CHUNKS_PER_DOC,
+)
 from .embedding_model import is_model_installed, load_embedder
 from .nlp import preprocess
-
-DOCUMENT_EMBED_BATCH = 64
 
 
 @dataclass
@@ -112,23 +120,11 @@ def _extract_document_chunks(meta: dict) -> tuple[str, str, list[str]] | None:
         return None
     page_meta = extract_page_metadata(html, url)
     chunks = chunk_text(build_document_text(page_meta))
+    if len(chunks) > MAX_CHUNKS_PER_DOC:
+        chunks = chunks[:MAX_CHUNKS_PER_DOC]
     if not chunks:
         return None
     return doc_id, content_hash, chunks
-
-
-def _extract_chunks_parallel(pending: list[dict]) -> list[tuple[str, str, list[str]]]:
-    if not pending:
-        return []
-
-    extracted: list[tuple[str, str, list[str]]] = []
-    with ProcessPoolExecutor(max_workers=os.cpu_count()) as pool:
-        futures = [pool.submit(_extract_document_chunks, meta) for meta in pending]
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                extracted.append(result)
-    return extracted
 
 
 def _embed_extracted_documents(
@@ -140,28 +136,115 @@ def _embed_extracted_documents(
 ) -> tuple[dict[str, DocumentEmbedding], int]:
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     embedded = 0
-    workers = os.cpu_count()
 
-    for batch_start in range(0, len(extracted), DOCUMENT_EMBED_BATCH):
-        batch = extracted[batch_start : batch_start + DOCUMENT_EMBED_BATCH]
-        all_chunks: list[str] = []
-        spans: list[tuple[str, str, list[str], int, int]] = []
+    all_chunks: list[str] = []
+    spans: list[tuple[str, str, list[str], int, int]] = []
 
-        for doc_id, content_hash, chunks in batch:
-            start = len(all_chunks)
-            all_chunks.extend(chunks)
-            spans.append((doc_id, content_hash, chunks, start, len(all_chunks)))
+    for doc_id, content_hash, chunks in extracted:
+        start = len(all_chunks)
+        all_chunks.extend(chunks)
+        spans.append((doc_id, content_hash, chunks, start, len(all_chunks)))
 
-        vectors = embed_text_chunks(all_chunks, embedder, parallel=workers)
-        for doc_id, content_hash, chunks, start, end in spans:
-            doc_vectors = vectors[start:end]
-            save_embedding(content_hash, chunks, doc_vectors)
-            doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=doc_vectors)
-            embedded += 1
-
-        progress.advance(task, len(batch))
+    vectors = run_with_progress_refresh(
+        progress,
+        embed_text_chunks,
+        all_chunks,
+        embedder,
+    )
+    for doc_id, content_hash, chunks, start, end in spans:
+        doc_vectors = vectors[start:end]
+        save_embedding(content_hash, chunks, doc_vectors)
+        doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=doc_vectors)
+        embedded += 1
+        progress.advance(task, 1)
 
     return doc_embeddings, embedded
+
+
+def _flush_embed_batch(
+    ready_to_embed: list[tuple[str, str, list[str]]],
+    *,
+    embedder: TextEmbedding,
+    doc_embeddings: dict[str, DocumentEmbedding],
+    progress,
+    task,
+) -> int:
+    batch = take_embed_batch(
+        ready_to_embed,
+        chunk_budget=EMBED_CHUNK_BUDGET,
+        solo_doc_chunks=EMBED_SOLO_DOC_CHUNKS,
+    )
+    if not batch:
+        return 0
+
+    batch_embeddings, batch_embedded = _embed_extracted_documents(
+        batch,
+        embedder=embedder,
+        progress=progress,
+        task=task,
+    )
+    doc_embeddings.update(batch_embeddings)
+    return batch_embedded
+
+
+def _extract_and_embed_pending(
+    pending: list[dict],
+    *,
+    embedder: TextEmbedding,
+    progress,
+    task,
+) -> tuple[dict[str, DocumentEmbedding], int, int]:
+    doc_embeddings: dict[str, DocumentEmbedding] = {}
+    embedded = 0
+    skipped_extract = 0
+    ready_to_embed: list[tuple[str, str, list[str]]] = []
+
+    with ProcessPoolExecutor(
+        max_workers=EXTRACT_WORKERS,
+        max_tasks_per_child=EXTRACT_POOL_RECYCLE,
+    ) as pool:
+        pending_iter = iter(pending)
+        in_flight: dict = {}
+
+        def submit_next() -> None:
+            meta = next(pending_iter, None)
+            if meta is not None:
+                in_flight[pool.submit(_extract_document_chunks, meta)] = meta
+
+        for _ in range(min(EXTRACT_PAGE_BATCH, len(pending))):
+            submit_next()
+
+        while in_flight or ready_to_embed:
+            done: set = set()
+            if in_flight:
+                done, _ = wait(
+                    in_flight,
+                    timeout=EMBED_WAIT_TIMEOUT_SEC if ready_to_embed else None,
+                    return_when=FIRST_COMPLETED,
+                )
+
+            for future in done:
+                del in_flight[future]
+                result = future.result()
+                if result is None:
+                    skipped_extract += 1
+                    progress.advance(task, 1)
+                else:
+                    ready_to_embed.append(result)
+                submit_next()
+
+            while ready_to_embed:
+                embedded += _flush_embed_batch(
+                    ready_to_embed,
+                    embedder=embedder,
+                    doc_embeddings=doc_embeddings,
+                    progress=progress,
+                    task=task,
+                )
+                if in_flight:
+                    break
+
+    return doc_embeddings, embedded, skipped_extract
 
 
 def _page_update_fields(page_meta: PageMetadata, content_hash: str) -> dict[str, str]:
@@ -360,25 +443,22 @@ def main(argv: list[str] | None = None) -> None:
             force=args.force,
         )
 
-        extracted: list[tuple[str, str, list[str]]] = []
+        embedded = 0
         skipped_extract = 0
         if pending:
-            console.print(f"[dim]Extracting text from {len(pending)} pages...[/dim]")
-            extracted = _extract_chunks_parallel(pending)
-            skipped_extract = len(pending) - len(extracted)
-
-        embedded = 0
-        if extracted:
-            console.print(f"[dim]Embedding {len(extracted)} pages...[/dim]")
+            console.print(
+                f"[dim]Extracting and embedding {len(pending)} pages"
+                f" ({EXTRACT_WORKERS} workers, up to {EXTRACT_PAGE_BATCH} in flight)...[/dim]"
+            )
             embedding_progress = make_determinate_progress()
             with embedding_progress:
                 embedding_task = embedding_progress.add_task(
                     "Building semantic embeddings",
                     total=len(doc_ids),
                 )
-                embedding_progress.advance(embedding_task, cached + skipped_extract)
-                new_embeddings, embedded = _embed_extracted_documents(
-                    extracted,
+                embedding_progress.advance(embedding_task, cached)
+                new_embeddings, embedded, skipped_extract = _extract_and_embed_pending(
+                    pending,
                     embedder=embedder,
                     progress=embedding_progress,
                     task=embedding_task,
