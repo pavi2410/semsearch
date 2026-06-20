@@ -42,5 +42,14 @@ def recency_boost(
     return min_boost + (max_boost - min_boost) * freshness
 
 
+def https_boost(doc: dict[str, str], *, https_multiplier: float = 1.05, http_multiplier: float = 0.95) -> float:
+    url = doc.get("url", "")
+    if url.startswith("https://"):
+        return https_multiplier
+    if url.startswith("http://"):
+        return http_multiplier
+    return 1.0
+
+
 def apply_ranking(bm25_score: float, doc: dict[str, str]) -> float:
-    return bm25_score * recency_boost(doc)
+    return bm25_score * recency_boost(doc) * https_boost(doc)

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from semsearch.search.ranking import apply_ranking, effective_timestamp, recency_boost
+from semsearch.search.ranking import apply_ranking, effective_timestamp, https_boost, recency_boost
 
 
 def test_effective_timestamp_prefers_modified_over_published():
@@ -36,3 +36,13 @@ def test_apply_ranking_scales_bm25_by_recency():
     stale_score = apply_ranking(10.0, stale_doc)
 
     assert fresh_score > stale_score
+
+
+def test_https_boost_prefers_secure_urls():
+    assert https_boost({"url": "https://example.com"}) > https_boost({"url": "http://example.com"})
+
+
+def test_apply_ranking_includes_https_boost():
+    secure = apply_ranking(10.0, {"url": "https://example.com"})
+    insecure = apply_ranking(10.0, {"url": "http://example.com"})
+    assert secure > insecure
