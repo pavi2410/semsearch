@@ -74,13 +74,26 @@ def search(query: str) -> SearchResult:
     scores = _bm25.get_scores(query_tokens)  # type: ignore[union-attr]
     end = time.perf_counter_ns()
 
+    positive_scores = [score for score in scores if score > 0]
+    bm25_max = max(positive_scores) if positive_scores else 0.0
+
     results = []
     for doc_id, bm25_score in zip(_doc_ids, scores):
         if bm25_score <= 0:
             continue
         doc = _docs.get(doc_id, {})
         pagerank_boost = _pagerank.get(doc_id, 1.0)
-        results.append((doc_id, apply_ranking(bm25_score, doc, pagerank_boost=pagerank_boost)))
+        results.append(
+            (
+                doc_id,
+                apply_ranking(
+                    bm25_score,
+                    doc,
+                    pagerank_boost=pagerank_boost,
+                    bm25_max=bm25_max,
+                ),
+            )
+        )
     results.sort(key=lambda x: x[1], reverse=True)
 
     return SearchResult(

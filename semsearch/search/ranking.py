@@ -51,8 +51,33 @@ def https_boost(doc: dict[str, str], *, https_multiplier: float = 1.05, http_mul
     return 1.0
 
 
-def apply_ranking(bm25_score: float, doc: dict[str, str], *, pagerank_boost: float = 1.0) -> float:
-    return bm25_score * recency_boost(doc) * https_boost(doc) * pagerank_boost
+def metadata_multiplier(doc: dict[str, str], *, pagerank_boost: float = 1.0) -> float:
+    return recency_boost(doc) * https_boost(doc) * pagerank_boost
+
+
+def dampen_metadata_boost(
+    metadata_multiplier: float,
+    relevance: float,
+    *,
+    strength: float = 0.85,
+) -> float:
+    """Reduce hub/recency lift as BM25 relevance rises within a result set."""
+    suppression = strength * min(1.0, max(0.0, relevance))
+    return 1.0 + (metadata_multiplier - 1.0) * (1.0 - suppression)
+
+
+def apply_ranking(
+    bm25_score: float,
+    doc: dict[str, str],
+    *,
+    pagerank_boost: float = 1.0,
+    bm25_max: float | None = None,
+) -> float:
+    meta = metadata_multiplier(doc, pagerank_boost=pagerank_boost)
+    if bm25_max is not None and bm25_max > 0:
+        relevance = min(1.0, bm25_score / bm25_max)
+        meta = dampen_metadata_boost(meta, relevance)
+    return bm25_score * meta
 
 
 def compute_pagerank_boosts(

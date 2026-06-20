@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from semsearch.search.ranking import (
     apply_ranking,
     compute_pagerank_boosts,
+    dampen_metadata_boost,
     effective_timestamp,
     https_boost,
     recency_boost,
@@ -88,3 +89,32 @@ def test_apply_ranking_includes_pagerank_boost():
     base = apply_ranking(10.0, doc, pagerank_boost=1.0)
     boosted = apply_ranking(10.0, doc, pagerank_boost=1.1)
     assert boosted > base
+
+
+def test_dampen_metadata_boost_reduces_lift_at_high_relevance():
+    meta = 1.4
+    assert dampen_metadata_boost(meta, 0.0) == meta
+    assert dampen_metadata_boost(meta, 1.0) < meta
+
+
+def test_apply_ranking_dampens_metadata_for_top_bm25_matches():
+    hub_doc = {
+        "url": "https://example.com",
+        "fetched_at": "2026-06-19T00:00:00Z",
+    }
+    peripheral = apply_ranking(5.0, hub_doc, pagerank_boost=1.3, bm25_max=10.0)
+    top_match = apply_ranking(10.0, hub_doc, pagerank_boost=1.3, bm25_max=10.0)
+
+    assert peripheral / 5.0 > top_match / 10.0
+
+
+def test_apply_ranking_preserves_bm25_order_for_strong_matches():
+    relevant = {"url": "https://example.com/relevant", "published_at": "2020-01-01T00:00:00Z"}
+    hub = {
+        "url": "https://example.com/",
+        "fetched_at": "2026-06-19T00:00:00Z",
+    }
+    relevant_score = apply_ranking(8.0, relevant, pagerank_boost=1.0, bm25_max=8.0)
+    hub_score = apply_ranking(6.0, hub, pagerank_boost=1.3, bm25_max=8.0)
+
+    assert relevant_score > hub_score
