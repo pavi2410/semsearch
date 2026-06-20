@@ -1,6 +1,13 @@
 from datetime import datetime, timezone
 
-from semsearch.search.ranking import apply_ranking, effective_timestamp, https_boost, recency_boost
+from semsearch.search.ranking import (
+    apply_ranking,
+    compute_pagerank_boosts,
+    effective_timestamp,
+    https_boost,
+    recency_boost,
+)
+from semsearch.storage.page import normalize_url
 
 
 def test_effective_timestamp_prefers_modified_over_published():
@@ -46,3 +53,32 @@ def test_apply_ranking_includes_https_boost():
     secure = apply_ranking(10.0, {"url": "https://example.com"})
     insecure = apply_ranking(10.0, {"url": "http://example.com"})
     assert secure > insecure
+
+
+def test_pagerank_boosts_linked_pages():
+    docs = {
+        "a": {"url": "https://example.com/a"},
+        "b": {"url": "https://example.com/b"},
+        "c": {"url": "https://example.com/c"},
+    }
+    url_to_doc = {normalize_url(doc["url"]): doc_id for doc_id, doc in docs.items()}
+    links = [
+        ("a", "https://example.com/b"),
+        ("b", "https://example.com/c"),
+    ]
+    boosts = compute_pagerank_boosts(list(docs), url_to_doc, links)
+
+    assert boosts["c"] > boosts["a"]
+    assert boosts["b"] > boosts["a"]
+
+
+def test_pagerank_returns_neutral_boost_without_links():
+    boosts = compute_pagerank_boosts(["a", "b"], {}, [])
+    assert boosts == {"a": 1.0, "b": 1.0}
+
+
+def test_apply_ranking_includes_pagerank_boost():
+    doc = {"url": "https://example.com"}
+    base = apply_ranking(10.0, doc, pagerank_boost=1.0)
+    boosted = apply_ranking(10.0, doc, pagerank_boost=1.1)
+    assert boosted > base
