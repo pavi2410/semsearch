@@ -7,6 +7,9 @@ def _hit(doc_id: str, score: float) -> SearchHit:
     breakdown = ScoreBreakdown(
         bm25=score,
         semantic=0.0,
+        bm25_rank=1,
+        semantic_rank=None,
+        fused_rank=1,
         base=score,
         base_source="bm25",
         recency=1.0,

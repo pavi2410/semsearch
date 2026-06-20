@@ -3,10 +3,12 @@ import re
 from urllib.parse import unquote, urlparse
 
 from rich import print as rprint
+from rich.console import Group
+from rich.rule import Rule
 from rich.style import Style
 from rich.text import Text
 
-from .search.search import SearchHit, format_score_breakdown, get_docs, search
+from .search.search import SearchHit, format_score_breakdown_rich, get_docs, search
 from .search.snippet import make_snippet
 
 HIGHLIGHT_STYLE = Style(bgcolor="yellow")
@@ -66,37 +68,56 @@ def _looks_like_nav_chrome(text: str) -> bool:
     return hits >= 2 or (hits == 1 and len(text.split()) > 12)
 
 
+def _format_score_lines(hit: SearchHit, *, language: str) -> Group:
+    signals, multipliers = format_score_breakdown_rich(hit.breakdown)
+    indent = "    "
+    lines: list[Text] = [Text(indent, style="dim") + signals]
+    if multipliers is not None:
+        lines.append(Text(indent, style="dim") + multipliers)
+    if language:
+        lines[-1].append(f" [{language}]", style="dim italic")
+    return Group(*lines)
+
+
 def display_results(
     query: str, results: list[SearchHit], query_time_ms: float, total_docs: int
 ) -> None:
     docs = get_docs()
+    shown = results[:RESULT_LIMIT]
+
     rprint()
-    rprint(f"Search results for [bold]{query}[/bold]")
+    rprint(Rule(f"[bold] {query} [/bold]", style="dim"))
     rprint(
-        f"[dim]Found {len(results)} results from {total_docs} pages in {query_time_ms:.3f} ms[/dim]"
+        f"[dim]{len(results)} results from {total_docs:,} pages · {query_time_ms:.1f} ms[/dim]"
     )
     rprint()
 
-    for hit in results[:RESULT_LIMIT]:
+    for rank, hit in enumerate(shown, start=1):
         doc = docs.get(hit.doc_id, {})
         title = doc.get("title", "").strip() or "Untitled page"
         link_url, display_url = _format_display_url(doc.get("url", ""))
         snippet = _result_snippet(doc, query)
+        language = doc.get("language", "").strip()
 
         highlighted_title = _highlight_text(title, query)
-        score_detail = format_score_breakdown(hit.breakdown)
-        language = doc.get("language", "").strip()
-        language_str = f" [{language}]" if language else ""
+        highlighted_title.stylize("bold")
 
         url_display = _format_url_display(display_url, link_url)
         _apply_query_highlights(url_display, query)
 
-        rprint(highlighted_title)
-        rprint("\u21b3", url_display)
+        rprint(Text(f"{rank:>2}. ", style="dim"), highlighted_title)
+        rprint(Text("    ↳ ", style="dim"), url_display)
         if snippet:
-            rprint(_highlight_text(snippet, query))
-        rprint(f"[dim]{score_detail}{language_str}[/dim]")
-        rprint()
+            snippet_text = _highlight_text(snippet, query)
+            snippet_text.stylize("dim")
+            rprint(Text("    ", style="dim"), snippet_text)
+        print()
+        rprint(_format_score_lines(hit, language=language))
+
+        if rank < len(shown):
+            rprint(Rule(style="dim bright_black"))
+
+    rprint()
 
 
 def main() -> None:

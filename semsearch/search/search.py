@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass
 
 from rank_bm25 import BM25Okapi
+from rich.text import Text
 
 from ..index.nlp import preprocess
 from ..storage import init_db
@@ -25,6 +26,9 @@ SEMANTIC_BM25_SCALE = 8.0
 class ScoreBreakdown:
     bm25: float
     semantic: float
+    bm25_rank: int | None
+    semantic_rank: int | None
+    fused_rank: int | None
     base: float
     base_source: str
     recency: float
@@ -35,6 +39,25 @@ class ScoreBreakdown:
     fusion: float
     fusion_multiplier: float
     final: float
+
+
+def build_rank_maps(
+    bm25_ranking: list[str],
+    semantic_ranking: list[str],
+    fused_scores: dict[str, float],
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    bm25_ranks = {doc_id: rank for rank, doc_id in enumerate(bm25_ranking, start=1)}
+    semantic_ranks = {doc_id: rank for rank, doc_id in enumerate(semantic_ranking, start=1)}
+    if fused_scores:
+        fused_order = sorted(fused_scores, key=fused_scores.get, reverse=True)
+    else:
+        fused_order = bm25_ranking
+    fused_ranks = {doc_id: rank for rank, doc_id in enumerate(fused_order, start=1)}
+    return bm25_ranks, semantic_ranks, fused_ranks
+
+
+def _format_rank(rank: int | None) -> str:
+    return f"#{rank}" if rank is not None else "—"
 
 
 @dataclass(frozen=True)
@@ -59,12 +82,22 @@ class SearchResult:
 def format_score_breakdown(breakdown: ScoreBreakdown) -> str:
     parts = [f"score {breakdown.final:.3f}"]
 
-    if breakdown.bm25 > 0:
-        parts.append(f"bm25 {breakdown.bm25:.2f}")
-    if breakdown.semantic > 0:
-        parts.append(f"sem {breakdown.semantic:.3f}")
-    if breakdown.semantic > 0 or breakdown.bm25 > 0:
-        parts.append(f"base {breakdown.base_source}")
+    if breakdown.bm25 > 0 or breakdown.bm25_rank is not None:
+        parts.append(
+            f"bm25 {_format_rank(breakdown.bm25_rank)} {breakdown.bm25:.2f}"
+            if breakdown.bm25 > 0
+            else f"bm25 {_format_rank(None)}"
+        )
+    if breakdown.semantic > 0 or breakdown.semantic_rank is not None:
+        parts.append(
+            f"sem {_format_rank(breakdown.semantic_rank)} {breakdown.semantic:.3f}"
+            if breakdown.semantic > 0
+            else f"sem {_format_rank(None)}"
+        )
+    if breakdown.fused_rank is not None:
+        parts.append(f"fused {_format_rank(breakdown.fused_rank)}")
+    if breakdown.fusion > 0:
+        parts.append(f"rrf {breakdown.fusion:.4f}")
 
     if abs(breakdown.recency - 1.0) > 0.001:
         parts.append(f"recency×{breakdown.recency:.2f}")
@@ -80,6 +113,69 @@ def format_score_breakdown(breakdown: ScoreBreakdown) -> str:
     return " · ".join(parts)
 
 
+def format_score_breakdown_rich(breakdown: ScoreBreakdown) -> tuple[Text, Text | None]:
+    """Return signal and multiplier lines with dim labels and brighter values."""
+    dim = "dim"
+    value = "dim cyan"
+    accent = "cyan"
+
+    def append_part(
+        line: Text,
+        label: str,
+        rendered: str,
+        *,
+        value_style: str = value,
+    ) -> None:
+        if line.plain:
+            line.append(" · ", style=dim)
+        line.append(label, style=dim)
+        line.append(rendered, style=value_style)
+
+    signals = Text()
+    append_part(signals, "score ", f"{breakdown.final:.3f}", value_style=accent)
+    if breakdown.bm25 > 0 or breakdown.bm25_rank is not None:
+        if breakdown.bm25 > 0:
+            append_part(
+                signals,
+                "bm25 ",
+                f"{_format_rank(breakdown.bm25_rank)} {breakdown.bm25:.2f}",
+            )
+        else:
+            append_part(signals, "bm25 ", _format_rank(None))
+    if breakdown.semantic > 0 or breakdown.semantic_rank is not None:
+        if breakdown.semantic > 0:
+            append_part(
+                signals,
+                "sem ",
+                f"{_format_rank(breakdown.semantic_rank)} {breakdown.semantic:.3f}",
+            )
+        else:
+            append_part(signals, "sem ", _format_rank(None))
+    if breakdown.fused_rank is not None:
+        append_part(
+            signals,
+            "fused ",
+            _format_rank(breakdown.fused_rank),
+            value_style=accent,
+        )
+    if breakdown.fusion > 0:
+        append_part(signals, "rrf ", f"{breakdown.fusion:.4f}")
+
+    multipliers = Text()
+    if abs(breakdown.recency - 1.0) > 0.001:
+        append_part(multipliers, "recency×", f"{breakdown.recency:.2f}")
+    if abs(breakdown.https - 1.0) > 0.001:
+        append_part(multipliers, "https×", f"{breakdown.https:.2f}")
+    if abs(breakdown.pagerank - 1.0) > 0.001:
+        append_part(multipliers, "pagerank×", f"{breakdown.pagerank:.2f}")
+    if abs(breakdown.title - 1.0) > 0.001:
+        append_part(multipliers, "title×", f"{breakdown.title:.2f}")
+    if breakdown.fusion > 0:
+        append_part(multipliers, "fusion×", f"{breakdown.fusion_multiplier:.3f}")
+
+    return signals, multipliers if multipliers.plain else None
+
+
 def _score_document(
     doc_id: str,
     *,
@@ -87,6 +183,9 @@ def _score_document(
     query_tokens: list[str],
     bm25_score: float,
     semantic_score: float,
+    bm25_rank: int | None,
+    semantic_rank: int | None,
+    fused_rank: int | None,
     bm25_max: float,
     fusion_boost: float,
     pagerank_boost: float,
@@ -110,6 +209,9 @@ def _score_document(
     breakdown = ScoreBreakdown(
         bm25=bm25_score,
         semantic=semantic_score,
+        bm25_rank=bm25_rank,
+        semantic_rank=semantic_rank,
+        fused_rank=fused_rank,
         base=base_score,
         base_source=base_source,
         recency=recency,
@@ -205,6 +307,11 @@ def search(query: str) -> SearchResult:
     ]
     semantic_ranking = sorted(semantic.keys(), key=lambda doc_id: semantic[doc_id], reverse=True)
     fused_scores = reciprocal_rank_fusion(bm25_ranking, semantic_ranking)
+    bm25_ranks, semantic_ranks, fused_ranks = build_rank_maps(
+        bm25_ranking,
+        semantic_ranking,
+        fused_scores,
+    )
 
     candidate_ids = (
         sorted(fused_scores, key=fused_scores.get, reverse=True)
@@ -220,6 +327,9 @@ def search(query: str) -> SearchResult:
             query_tokens=query_tokens,
             bm25_score=score_by_doc[doc_id],
             semantic_score=semantic.get(doc_id, 0.0),
+            bm25_rank=bm25_ranks.get(doc_id),
+            semantic_rank=semantic_ranks.get(doc_id),
+            fused_rank=fused_ranks.get(doc_id),
             bm25_max=bm25_max,
             fusion_boost=fused_scores.get(doc_id, 0.0),
             pagerank_boost=_pagerank.get(doc_id, 1.0),
