@@ -53,6 +53,23 @@ def save_page(url: str, html: str, last_fetched: str) -> dict:
     return {"url": url, "lastFetchedAt": last_fetched, "contentHash": content_hash}
 
 
+async def async_save_page(url: str, html: str, last_fetched: str) -> dict:
+    from .models import Page as AsyncPage, db
+
+    content_hash = save_content(html)
+    url = normalize_url(url)
+    h = url_hash(url)
+    await db.aexecute(
+        AsyncPage.replace(
+            url_hash=h,
+            url=url,
+            fetched_at=last_fetched,
+            content_hash=content_hash,
+        )
+    )
+    return {"url": url, "lastFetchedAt": last_fetched, "contentHash": content_hash}
+
+
 def read_page_meta(url: str) -> dict | None:
     h = url_hash(normalize_url(url))
     try:
@@ -64,6 +81,21 @@ def read_page_meta(url: str) -> dict | None:
         }
     except Page.DoesNotExist:
         return None
+
+
+async def async_read_page_meta(url: str) -> dict | None:
+    from .models import Page as AsyncPage, db
+
+    h = url_hash(normalize_url(url))
+    try:
+        page = await db.get(AsyncPage.select().where(AsyncPage.url_hash == h))
+    except AsyncPage.DoesNotExist:
+        return None
+    return {
+        "url": page.url,
+        "lastFetchedAt": page.fetched_at,
+        "contentHash": page.content_hash,
+    }
 
 
 def iter_page_metas() -> Iterator[dict]:
