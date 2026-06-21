@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
@@ -328,6 +329,7 @@ def _load_cached_embeddings(
     doc_ids: list[str],
     *,
     force_embeddings: bool,
+    console: Console | None = None,
 ) -> tuple[dict[str, DocumentEmbedding], list[dict], int]:
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     pending: list[dict] = []
@@ -338,21 +340,48 @@ def _load_cached_embeddings(
         for page in Page.select().where(Page.url_hash.in_(doc_ids))
     }
 
-    for doc_id in doc_ids:
-        page = pages_by_id.get(doc_id)
-        if page is None:
-            continue
-        if not force_embeddings:
-            vectors = load_embedding(page.content_hash)
-            if vectors is not None:
-                chunks = chunks_for_content(page.content_hash, page.url)
-                if chunks is not None and len(chunks) == len(vectors):
-                    doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
-                    cached += 1
-                    continue
-        pending.append(
-            {"urlHash": doc_id, "url": page.url, "contentHash": page.content_hash}
+    if not force_embeddings and console is not None:
+        console.print(
+            f"[dim]Checking embedding cache for {len(doc_ids)} pages...[/dim]"
         )
+
+    progress = (
+        make_determinate_progress()
+        if console is not None and not force_embeddings
+        else None
+    )
+    task = None
+    if progress is not None:
+        progress.start()
+        task = progress.add_task("Checking embedding cache", total=len(doc_ids))
+
+    try:
+        for doc_id in doc_ids:
+            page = pages_by_id.get(doc_id)
+            if page is None:
+                if task is not None:
+                    progress.advance(task)
+                continue
+            if not force_embeddings:
+                vectors = load_embedding(page.content_hash)
+                if vectors is not None:
+                    chunks = chunks_for_content(page.content_hash, page.url)
+                    if chunks is not None and len(chunks) == len(vectors):
+                        doc_embeddings[doc_id] = DocumentEmbedding(
+                            chunks=chunks, vectors=vectors
+                        )
+                        cached += 1
+                        if task is not None:
+                            progress.advance(task)
+                        continue
+            pending.append(
+                {"urlHash": doc_id, "url": page.url, "contentHash": page.content_hash}
+            )
+            if task is not None:
+                progress.advance(task)
+    finally:
+        if progress is not None:
+            progress.stop()
 
     return doc_embeddings, pending, cached
 
@@ -413,6 +442,8 @@ def _run_process_pool(
 
 
 def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
     force_bm25, force_embeddings, argv = extract_force_flags(argv)
 
     parser = argparse.ArgumentParser(
@@ -493,6 +524,7 @@ def main(argv: list[str] | None = None) -> None:
         doc_embeddings, pending, cached = _load_cached_embeddings(
             doc_ids,
             force_embeddings=force_embeddings,
+            console=console,
         )
 
         embedded = 0
