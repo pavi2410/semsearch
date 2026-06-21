@@ -37,69 +37,11 @@ def _db_path_str(path: Path) -> str:
     return str(path)
 
 
-def _table_columns(database: SqliteDatabase, table: str) -> set[str]:
-    rows = database.execute_sql(f"PRAGMA table_info({table})").fetchall()
-    return {row[1] for row in rows}
-
-
-def _link_index_names() -> set[str]:
-    rows = sync_db.execute_sql(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'links'"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
-def _column_type(database: SqliteDatabase, table: str, column: str) -> str | None:
-    rows = database.execute_sql(f"PRAGMA table_info({table})").fetchall()
-    for row in rows:
-        if row[1] == column:
-            return row[2]
-    return None
-
-
-def _migrate_token_cache_to_jsonb() -> None:
-    column_type = _column_type(sync_db, "token_cache", "tokens")
-    if column_type is None:
-        return
-    if column_type.upper() == "JSONB":
-        return
-
-    sync_db.execute_sql(
-        """
-        CREATE TABLE token_cache_jsonb (
-            content_hash TEXT NOT NULL PRIMARY KEY,
-            tokens JSONB NOT NULL
-        )
-        """
-    )
-    sync_db.execute_sql(
-        """
-        INSERT INTO token_cache_jsonb (content_hash, tokens)
-        SELECT content_hash, jsonb(tokens)
-        FROM token_cache
-        """
-    )
-    sync_db.execute_sql("DROP TABLE token_cache")
-    sync_db.execute_sql("ALTER TABLE token_cache_jsonb RENAME TO token_cache")
-
-
 def migrate_schema() -> None:
     """Add new columns/tables to existing databases without dropping data."""
-    page_cols = _table_columns(sync_db, "pages")
-    for column, sql_type in _PAGE_COLUMNS.items():
-        if column not in page_cols:
-            sync_db.execute_sql(f"ALTER TABLE pages ADD COLUMN {column} {sql_type}")
+    from .schema_migrate import run_schema_migrations
 
-    sync_db.create_tables([SyncLink, SyncTokenCache, SyncEmbeddingCache], safe=True)
-
-    link_indexes = _link_index_names()
-    if (
-        "link_source_hash_target_url" in link_indexes
-        and "synclink_source_hash_target_url" in link_indexes
-    ):
-        sync_db.execute_sql("DROP INDEX IF EXISTS synclink_source_hash_target_url")
-
-    _migrate_token_cache_to_jsonb()
+    run_schema_migrations()
 
 
 def init_db(path: Path = _DB_PATH) -> None:
