@@ -1,6 +1,8 @@
 from peewee import SQL
 from playhouse.migrate import SqliteMigrator, migrate, operation
 
+import pickle
+
 from .models import (
     SyncEmbeddingCache,
     SyncLink,
@@ -60,6 +62,18 @@ class SemsearchMigrator(SqliteMigrator):
             SQL('ALTER TABLE "token_cache_jsonb" RENAME TO "token_cache"'),
         ]
 
+    @operation
+    def clear_legacy_embedding_cache(self):
+        row = self.database.execute_sql(
+            "SELECT payload FROM embedding_cache LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        payload = pickle.loads(row[0])
+        if not isinstance(payload, dict):
+            return None
+        return SQL('DELETE FROM "embedding_cache"')
+
 
 def run_schema_migrations() -> None:
     """Apply incremental schema changes to an existing semsearch.db."""
@@ -83,6 +97,7 @@ def run_schema_migrations() -> None:
         )
 
     operations.append(migrator.convert_token_cache_tokens_to_jsonb())
+    operations.append(migrator.clear_legacy_embedding_cache())
 
     if operations:
         with sync_db.transaction():

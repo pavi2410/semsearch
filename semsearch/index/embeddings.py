@@ -3,7 +3,9 @@ from dataclasses import dataclass
 import numpy as np
 from fastembed import TextEmbedding
 
-from ..crawl.metadata import PageMetadata
+from ..crawl.content_filter import is_indexable_page
+from ..crawl.metadata import PageMetadata, extract_page_metadata
+from ..storage.content import try_read_content
 from .chunking import chunk_text
 from .embedding_config import EMBED_CHUNK_BATCH_SIZE, EMBED_PARALLEL
 from .embedding_model import DEFAULT_MODEL, load_embedder
@@ -30,6 +32,16 @@ def build_document_text(page_meta: PageMetadata) -> str:
         for part in (page_meta.title, page_meta.description, page_meta.body_text)
         if part
     )
+
+
+def chunks_for_content(content_hash: str, url: str) -> list[str] | None:
+    html = try_read_content(content_hash)
+    if html is None:
+        return None
+    if not is_indexable_page(url, html):
+        return None
+    page_meta = extract_page_metadata(html, url)
+    return chunk_text(build_document_text(page_meta))
 
 
 def embed_text_chunks(

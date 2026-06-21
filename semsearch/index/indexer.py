@@ -28,6 +28,7 @@ from .embeddings import (
     build_document_text,
     build_embedding_index,
     chunk_text,
+    chunks_for_content,
     embed_text_chunks,
 )
 from .embedding_batch import take_embed_batch
@@ -168,7 +169,7 @@ def _embed_extracted_documents(
     )
     for doc_id, content_hash, chunks, start, end in spans:
         doc_vectors = vectors[start:end]
-        save_embedding(content_hash, chunks, doc_vectors)
+        save_embedding(content_hash, doc_vectors)
         doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=doc_vectors)
         embedded += 1
         progress.advance(task, 1)
@@ -321,12 +322,13 @@ def _load_cached_embeddings(
     for doc_id in doc_ids:
         page = Page.get_by_id(doc_id)
         if not force:
-            cached_embedding = load_embedding(page.content_hash)
-            if cached_embedding is not None:
-                chunks, vectors = cached_embedding
-                doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
-                cached += 1
-                continue
+            vectors = load_embedding(page.content_hash)
+            if vectors is not None:
+                chunks = chunks_for_content(page.content_hash, page.url)
+                if chunks is not None and len(chunks) == len(vectors):
+                    doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=vectors)
+                    cached += 1
+                    continue
         pending.append(
             {"urlHash": doc_id, "url": page.url, "contentHash": page.content_hash}
         )
