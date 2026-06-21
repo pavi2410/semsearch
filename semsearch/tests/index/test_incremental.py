@@ -1,6 +1,6 @@
 import pytest
 
-from semsearch.index.indexer import build_index_stats, plan_index
+from semsearch.index.indexer import build_index_stats, filter_pages_with_content, plan_index
 from semsearch.storage.models import SyncPage as Page, SyncTokenCache, init_db
 from semsearch.storage.token_cache import load_tokens, save_tokens
 
@@ -25,6 +25,16 @@ def test_plan_index_reuses_unchanged_pages():
     assert plan.reused == {"aaa": ["hello", "world"]}
     assert len(plan.to_process) == 1
     assert plan.to_process[0]["urlHash"] == "bbb"
+
+
+def test_filter_pages_with_content_drops_missing_files():
+    pages = [
+        {"urlHash": "aaa", "contentHash": "0123456789abcdef"},
+        {"urlHash": "bbb", "contentHash": "abc"},
+    ]
+    valid, missing = filter_pages_with_content(pages)
+    assert valid == []
+    assert missing == 2
 
 
 def test_plan_index_force_reprocesses_all():

@@ -16,7 +16,7 @@ from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
-from ..storage import init_db, iter_page_metas, read_content, url_hash
+from ..storage import content_available, init_db, iter_page_metas, try_read_content, url_hash
 from ..storage.embedding_cache import load_embedding, save_embedding
 from ..storage.models import SyncLink as Link
 from ..storage.models import SyncPage as Page
@@ -59,6 +59,17 @@ class IndexStats:
     skipped: int
 
 
+def filter_pages_with_content(pages: list[dict]) -> tuple[list[dict], int]:
+    valid: list[dict] = []
+    missing = 0
+    for page in pages:
+        if content_available(page["contentHash"]):
+            valid.append(page)
+        else:
+            missing += 1
+    return valid, missing
+
+
 def plan_index(
     pages: list[dict],
     *,
@@ -97,7 +108,9 @@ def build_index_stats(
 def _process_page(meta: dict) -> tuple[str, str, str, PageMetadata, list[str]] | None:
     url = meta["url"]
     content_hash = meta["contentHash"]
-    html = read_content(content_hash)
+    html = try_read_content(content_hash)
+    if html is None:
+        return None
     if not is_indexable_page(url, html):
         return None
     page_meta = extract_page_metadata(html, url)
@@ -115,7 +128,9 @@ def _extract_document_chunks(meta: dict) -> tuple[str, str, list[str]] | None:
     url = meta["url"]
     content_hash = meta["contentHash"]
     doc_id = meta["urlHash"]
-    html = read_content(content_hash)
+    html = try_read_content(content_hash)
+    if html is None:
+        return None
     if not is_indexable_page(url, html):
         return None
     page_meta = extract_page_metadata(html, url)
@@ -384,7 +399,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     init_db()
-    pages = list(iter_page_metas())
+    all_pages = list(iter_page_metas())
+    pages, missing_content = filter_pages_with_content(all_pages)
     domains = Counter(page["url"].split("/")[2] for page in pages)
     plan = plan_index(pages, force=args.force)
     previous_doc_ids = load_previous_doc_ids()
@@ -394,6 +410,10 @@ def main(argv: list[str] | None = None) -> None:
         f"Found [bold]{len(pages)}[/bold] webpages"
         f" from [bold]{len(domains)}[/bold] unique domains"
     )
+    if missing_content:
+        console.print(
+            f"[yellow]Skipping {missing_content} pages with missing content files[/yellow]"
+        )
     if args.force:
         console.print("[dim]Force mode — reprocessing all pages[/dim]")
 

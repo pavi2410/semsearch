@@ -20,7 +20,7 @@ from ..storage import (
     async_save_page,
     async_touch_page,
     init_db,
-    read_content,
+    try_read_content,
 )
 from ..storage.models import db
 from ..storage.page import normalize_url
@@ -109,8 +109,10 @@ def parse_cache_headers(response: httpx.Response) -> tuple[str | None, str | Non
     )
 
 
-def _links_from_cached(meta: dict, url: str) -> list[str]:
-    html = read_content(meta["contentHash"])
+def _links_from_cached(meta: dict, url: str) -> list[str] | None:
+    html = try_read_content(meta["contentHash"])
+    if html is None:
+        return None
     return [
         link
         for link in extract_outbound_links(html, url)
@@ -273,9 +275,15 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
 
         meta = await async_read_page_meta(url)
         if meta is not None and not is_stale(meta):
-            ctx.progress.print(f"  Skip fetching {url}")
-            ctx.stats.inc("skipped")
-            return _links_from_cached(meta, url)
+            links = _links_from_cached(meta, url)
+            if links is not None:
+                ctx.progress.print(f"  Skip fetching {url}")
+                ctx.stats.inc("skipped")
+                return links
+            ctx.progress.print(
+                f"  [yellow]Missing cached content[/yellow] {url}, re-fetching"
+            )
+            meta = None
 
         is_new_page = meta is None
         domain = urlparse(url).hostname or url
@@ -332,7 +340,25 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                     or None,
                 )
                 ctx.progress.print(f"  Not modified {url}")
-                return _links_from_cached(meta, url)
+                links = _links_from_cached(meta, url)
+                if links is not None:
+                    return links
+                ctx.progress.print(
+                    f"  [yellow]Missing cached content[/yellow] {url}, re-fetching"
+                )
+                resp = await _http_get_with_retry(
+                    ctx.client,
+                    url,
+                    headers=HTTP_HEADERS,
+                    timeout=FETCH_TIMEOUT,
+                    ctx=ctx,
+                )
+                if resp.status_code == 304:
+                    ctx.progress.print(
+                        f"  [yellow]Content missing after 304[/yellow] {url}"
+                    )
+                    return None
+                meta = None
 
             try:
                 resp.raise_for_status()

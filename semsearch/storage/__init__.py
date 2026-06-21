@@ -1,4 +1,4 @@
-from .content import read_content, save_content
+from .content import content_available, read_content, save_content, try_read_content
 from .models import async_init_db, init_db
 from .page import (
     async_read_page_meta,
@@ -21,5 +21,7 @@ __all__ = [
     "iter_page_metas",
     "save_content",
     "read_content",
+    "try_read_content",
+    "content_available",
     "url_hash",
 ]
