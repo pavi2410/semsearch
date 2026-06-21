@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from peewee import BlobField, BooleanField, FloatField, Model, SqliteDatabase, TextField
+from peewee import AutoField, BlobField, BooleanField, FloatField, IntegerField, Model, SqliteDatabase, TextField
 from playhouse.sqlite_ext import JSONBField
 
 _DB_PATH = Path("data") / "semsearch.db"
@@ -42,7 +42,7 @@ def migrate_schema() -> None:
 def init_db(path: Path = _DB_PATH) -> None:
     """Initialise the database."""
     db.init(_db_path_str(path), pragmas=_PRAGMAS)
-    db.create_tables([Page, Block, Link, TokenCache, EmbeddingCache], safe=True)
+    db.create_tables([Page, Block, TargetUrl, Link, TokenCache, EmbeddingCache], safe=True)
     migrate_schema()
 
 
@@ -85,14 +85,22 @@ class Block(BaseModel):
         table_name = "blocks"
 
 
+class TargetUrl(BaseModel):
+    id = AutoField(primary_key=True)
+    url = TextField(unique=True)
+
+    class Meta:
+        table_name = "target_urls"
+
+
 class Link(BaseModel):
     source_hash = TextField()
-    target_url = TextField()
+    target_id = IntegerField()
 
     class Meta:
         table_name = "links"
         primary_key = False
-        indexes = ((("source_hash", "target_url"), True),)
+        indexes = ((("source_hash", "target_id"), True),)
 
 
 class TokenCache(BaseModel):

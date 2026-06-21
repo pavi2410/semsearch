@@ -4,9 +4,11 @@ from playhouse.migrate import SqliteMigrator, migrate, operation
 import pickle
 
 from .models import (
+    Block,
     EmbeddingCache,
     Link,
     Page,
+    TargetUrl,
     TokenCache,
     _PAGE_COLUMNS,
     db,
@@ -26,14 +28,14 @@ def _column_type(table: str, column: str) -> str | None:
     return None
 
 
-def _link_index_names() -> set[str]:
-    rows = db.execute_sql(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'links'"
-    ).fetchall()
-    return {row[0] for row in rows}
-
-
 class SemsearchMigrator(SqliteMigrator):
+    @operation
+    def drop_legacy_links_table(self):
+        link_cols = _table_columns("links")
+        if not link_cols or "target_url" not in link_cols:
+            return None
+        return [SQL('DROP TABLE IF EXISTS "links"')]
+
     @operation
     def convert_token_cache_tokens_to_jsonb(self):
         column_type = _column_type("token_cache", "tokens")
@@ -78,27 +80,25 @@ class SemsearchMigrator(SqliteMigrator):
 def run_schema_migrations() -> None:
     """Apply incremental schema changes to an existing semsearch.db."""
     migrator = SemsearchMigrator(db)
-    operations = []
+    db.create_tables([Page, Block, TokenCache, EmbeddingCache], safe=True)
 
     page_cols = _table_columns("pages")
+    operations = []
     for column in _PAGE_COLUMNS:
         if column not in page_cols:
             operations.append(migrator.add_column("pages", column, Page._meta.fields[column]))
 
-    db.create_tables([Link, TokenCache, EmbeddingCache], safe=True)
-
-    link_indexes = _link_index_names()
-    if (
-        "link_source_hash_target_url" in link_indexes
-        and "synclink_source_hash_target_url" in link_indexes
-    ):
-        operations.append(
-            migrator.drop_index("links", "synclink_source_hash_target_url")
-        )
-
-    operations.append(migrator.convert_token_cache_tokens_to_jsonb())
-    operations.append(migrator.clear_legacy_embedding_cache())
+    operations.append(migrator.drop_legacy_links_table())
 
     if operations:
         with db.transaction():
             migrate(*operations)
+
+    db.create_tables([TargetUrl, Link, TokenCache, EmbeddingCache], safe=True)
+
+    operations = [
+        migrator.convert_token_cache_tokens_to_jsonb(),
+        migrator.clear_legacy_embedding_cache(),
+    ]
+    with db.transaction():
+        migrate(*operations)

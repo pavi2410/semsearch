@@ -18,8 +18,9 @@ from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
 from ..storage import content_available, init_db, iter_page_metas, try_read_content
 from ..storage.embedding_cache import load_embedding, save_embedding
-from ..storage.models import Link, Page
+from ..storage.models import Link, Page, TargetUrl
 from ..storage.page import normalize_url
+from ..storage.url_intern import intern_urls
 from ..storage.token_cache import load_tokens, save_tokens
 from .embeddings import (
     DocumentEmbedding,
@@ -282,9 +283,15 @@ def _save_links(doc_id: str, outbound_links: list[str]) -> None:
     Link.delete().where(Link.source_hash == doc_id).execute()
     if not outbound_links:
         return
-    Link.insert_many(
-        [{"source_hash": doc_id, "target_url": target} for target in outbound_links]
-    ).execute()
+    normalized = list(dict.fromkeys(normalize_url(url) for url in outbound_links))
+    url_to_id = intern_urls(normalized)
+    rows = [
+        {"source_hash": doc_id, "target_id": url_to_id[url]}
+        for url in normalized
+        if url in url_to_id
+    ]
+    if rows:
+        Link.insert_many(rows).execute()
 
 
 def _persist_page(doc_id: str, content_hash: str, page_meta: PageMetadata) -> None:
@@ -305,7 +312,12 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
         for page in Page.select(Page.url, Page.url_hash)
         if page.url_hash in doc_id_set
     }
-    links = [(link.source_hash, link.target_url) for link in Link.select()]
+    links = [
+        (source_hash, target_url)
+        for source_hash, target_url in Link.select(Link.source_hash, TargetUrl.url)
+        .join(TargetUrl, on=(Link.target_id == TargetUrl.id))
+        .tuples()
+    ]
     return compute_pagerank_boosts(doc_ids, url_to_doc, links)
 
 
