@@ -1,8 +1,48 @@
 import pytest
 
-from semsearch.index.indexer import build_index_stats, filter_pages_with_content, plan_index
+from semsearch.index.indexer import (
+    _process_page,
+    build_index_stats,
+    filter_pages_with_content,
+    plan_index,
+)
 from semsearch.storage.models import Page, TokenCache, init_db
 from semsearch.storage.token_cache import load_tokens, save_tokens
+
+
+def test_process_page_uses_stored_url_hash(monkeypatch):
+    html = "<html><head><title>Hi</title></head><body><p>Hello</p></body></html>"
+    meta = {
+        "url": "https://example.com/page?locale=en-US",
+        "urlHash": "stored-hash",
+        "contentHash": "abc123",
+    }
+    monkeypatch.setattr("semsearch.index.indexer.try_read_content", lambda _hash: html)
+    monkeypatch.setattr("semsearch.index.indexer.is_indexable_page", lambda *_args: True)
+    monkeypatch.setattr("semsearch.index.indexer.preprocess", lambda text: text.split())
+    monkeypatch.setattr(
+        "semsearch.index.indexer.extract_page_metadata",
+        lambda _html, _url: type(
+            "Meta",
+            (),
+            {
+                "title": "Hi",
+                "description": "",
+                "body_text": "Hello",
+                "outbound_links": [],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "semsearch.storage.page.url_hash",
+        lambda _url: "recomputed-hash",
+    )
+
+    result = _process_page(meta)
+
+    assert result is not None
+    _url, doc_id, _content_hash, _page_meta, _tokens = result
+    assert doc_id == "stored-hash"
 
 
 def test_plan_index_reuses_unchanged_pages():

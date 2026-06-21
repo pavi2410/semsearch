@@ -16,7 +16,7 @@ from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
-from ..storage import content_available, init_db, iter_page_metas, try_read_content, url_hash
+from ..storage import content_available, init_db, iter_page_metas, try_read_content
 from ..storage.embedding_cache import load_embedding, save_embedding
 from ..storage.models import Link, Page
 from ..storage.page import normalize_url
@@ -114,7 +114,7 @@ def _process_page(meta: dict) -> tuple[str, str, str, PageMetadata, list[str]] |
     if not is_indexable_page(url, html):
         return None
     page_meta = extract_page_metadata(html, url)
-    doc_id = url_hash(url)
+    doc_id = meta["urlHash"]
     index_text = " ".join(
         part
         for part in (page_meta.title, page_meta.description, page_meta.body_text)
@@ -319,7 +319,10 @@ def _load_cached_embeddings(
     cached = 0
 
     for doc_id in doc_ids:
-        page = Page.get_by_id(doc_id)
+        try:
+            page = Page.get_by_id(doc_id)
+        except Page.DoesNotExist:
+            continue
         if not force:
             vectors = load_embedding(page.content_hash)
             if vectors is not None:
