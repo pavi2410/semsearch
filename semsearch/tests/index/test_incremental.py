@@ -92,4 +92,9 @@ def test_persist_page_sets_indexed_content_hash(db):
     assert page.indexed_content_hash == "hash-a"
 
     save_tokens("hash-a", ["hello"])
-    assert SyncTokenCache.get_by_id("hash-a").tokens == '["hello"]'
+    row = (
+        SyncTokenCache.select(SyncTokenCache.tokens.json())
+        .where(SyncTokenCache.content_hash == "hash-a")
+        .get()
+    )
+    assert row.tokens == ["hello"]

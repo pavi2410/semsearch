@@ -2,6 +2,7 @@ from pathlib import Path
 
 from peewee import BlobField, BooleanField, FloatField, Model, SqliteDatabase, TextField
 from playhouse.pwasyncio import AsyncSqliteDatabase
+from playhouse.sqlite_ext import JSONBField
 
 _DB_PATH = Path("data") / "semsearch.db"
 
@@ -48,6 +49,40 @@ def _link_index_names() -> set[str]:
     return {row[0] for row in rows}
 
 
+def _column_type(database: SqliteDatabase, table: str, column: str) -> str | None:
+    rows = database.execute_sql(f"PRAGMA table_info({table})").fetchall()
+    for row in rows:
+        if row[1] == column:
+            return row[2]
+    return None
+
+
+def _migrate_token_cache_to_jsonb() -> None:
+    column_type = _column_type(sync_db, "token_cache", "tokens")
+    if column_type is None:
+        return
+    if column_type.upper() == "JSONB":
+        return
+
+    sync_db.execute_sql(
+        """
+        CREATE TABLE token_cache_jsonb (
+            content_hash TEXT NOT NULL PRIMARY KEY,
+            tokens JSONB NOT NULL
+        )
+        """
+    )
+    sync_db.execute_sql(
+        """
+        INSERT INTO token_cache_jsonb (content_hash, tokens)
+        SELECT content_hash, jsonb(tokens)
+        FROM token_cache
+        """
+    )
+    sync_db.execute_sql("DROP TABLE token_cache")
+    sync_db.execute_sql("ALTER TABLE token_cache_jsonb RENAME TO token_cache")
+
+
 def migrate_schema() -> None:
     """Add new columns/tables to existing databases without dropping data."""
     page_cols = _table_columns(sync_db, "pages")
@@ -63,6 +98,8 @@ def migrate_schema() -> None:
         and "synclink_source_hash_target_url" in link_indexes
     ):
         sync_db.execute_sql("DROP INDEX IF EXISTS synclink_source_hash_target_url")
+
+    _migrate_token_cache_to_jsonb()
 
 
 def init_db(path: Path = _DB_PATH) -> None:
@@ -176,7 +213,7 @@ class SyncLink(Model):
 
 class SyncTokenCache(Model):
     content_hash = TextField(primary_key=True)
-    tokens = TextField()
+    tokens = JSONBField()
 
     class Meta:
         table_name = "token_cache"
