@@ -1,6 +1,11 @@
 import numpy as np
 
-from semsearch.storage.vector_codec import decode_vectors, encode_vectors, is_quantized_embedding
+from semsearch.storage.vector_codec import (
+    decode_vectors,
+    embedding_row_count,
+    encode_vectors,
+    is_quantized_embedding,
+)
 
 
 def test_encode_decode_round_trip():
@@ -40,3 +45,11 @@ def test_decode_rejects_invalid_payload():
         assert "EMB1" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_embedding_row_count_reads_header_without_decode():
+    vectors = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    payload = encode_vectors(vectors)
+    assert embedding_row_count(payload) == 2
+    assert embedding_row_count(b"not-emb1") is None
+    assert embedding_row_count(payload[:-1]) is None

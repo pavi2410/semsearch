@@ -11,6 +11,25 @@ def is_quantized_embedding(payload: bytes) -> bool:
     return len(payload) >= _EMB1_HEADER.size and payload[:4] == EMB1_MAGIC
 
 
+def embedding_row_count(payload: bytes) -> int | None:
+    """Return the vector row count from an EMB1 header without decoding vectors."""
+    if not is_quantized_embedding(payload):
+        return None
+
+    _magic, version, nrows, ndim = _EMB1_HEADER.unpack_from(payload)
+    if version != EMB1_VERSION:
+        return None
+
+    if nrows == 0:
+        return 0
+
+    expected_size = _EMB1_HEADER.size + (4 * nrows) + (nrows * ndim)
+    if len(payload) != expected_size:
+        return None
+
+    return nrows
+
+
 def encode_vectors(vectors: np.ndarray) -> bytes:
     """Quantize L2-normalized float32 vectors to EMB1 int8 payload."""
     vectors = np.asarray(vectors, dtype=np.float32)

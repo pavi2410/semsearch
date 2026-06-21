@@ -18,18 +18,18 @@ from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
 from ..storage import content_available, init_db, iter_page_metas, try_read_content
-from ..storage.embedding_cache import load_embedding, save_embeddings
+from ..storage.embedding_cache import load_embedding_payload, save_embeddings
 from ..storage.models import Link, Page, TargetUrl
 from ..storage.page import normalize_url
 from ..storage.url_intern import intern_urls
 from ..storage.token_cache import load_tokens, save_tokens
+from ..storage.vector_codec import decode_vectors, embedding_row_count
 from .embeddings import (
     DocumentEmbedding,
     EmbeddingIndex,
     build_document_text,
     build_embedding_index,
     chunk_text,
-    chunks_for_content,
     embed_text_chunks,
 )
 from .embedding_batch import take_embed_batch
@@ -363,12 +363,14 @@ def _load_cached_embeddings(
                     progress.advance(task)
                 continue
             if not force_embeddings:
-                vectors = load_embedding(page.content_hash)
-                if vectors is not None:
-                    chunks = chunks_for_content(page.content_hash, page.url)
-                    if chunks is not None and len(chunks) == len(vectors):
+                payload = load_embedding_payload(page.content_hash)
+                if payload is not None:
+                    nrows = embedding_row_count(payload)
+                    if nrows is not None and nrows > 0:
+                        vectors = decode_vectors(payload)
                         doc_embeddings[doc_id] = DocumentEmbedding(
-                            chunks=chunks, vectors=vectors
+                            chunks=[""] * nrows,
+                            vectors=vectors,
                         )
                         cached += 1
                         if task is not None:

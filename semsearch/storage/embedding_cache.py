@@ -4,13 +4,20 @@ from .models import EmbeddingCache, db
 from .vector_codec import decode_vectors, encode_vectors, is_quantized_embedding
 
 
-def load_embedding(content_hash: str) -> np.ndarray | None:
+def load_embedding_payload(content_hash: str) -> bytes | None:
     try:
         row = EmbeddingCache.get_by_id(content_hash)
     except EmbeddingCache.DoesNotExist:
         return None
     payload = row.payload
     if not is_quantized_embedding(payload):
+        return None
+    return payload
+
+
+def load_embedding(content_hash: str) -> np.ndarray | None:
+    payload = load_embedding_payload(content_hash)
+    if payload is None:
         return None
     return decode_vectors(payload)
 
