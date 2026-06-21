@@ -2,7 +2,7 @@ import argparse
 
 from rich.console import Console
 
-from .model_download import download_embedding_model
+from .model_download import cleanup_duplicate_hf_hub_cache, download_embedding_model
 from .index.embedding_model import LOCAL_MODEL_DIR, is_model_installed
 
 
@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> None:
 
     console = Console()
     if is_model_installed() and not args.force:
+        cleanup_duplicate_hf_hub_cache()
         console.print(
             f"[green]Embedding model already installed[/green] at [bold]{LOCAL_MODEL_DIR}[/bold]"
         )

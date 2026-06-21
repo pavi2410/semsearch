@@ -4,7 +4,28 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-from .index.embedding_model import HF_MODEL_REPO, LOCAL_MODEL_DIR, is_model_installed
+from .index.embedding_model import (
+    HF_MODEL_REPO,
+    LOCAL_MODEL_DIR,
+    MODEL_CACHE_DIR,
+    is_model_installed,
+)
+
+
+def hf_hub_cache_dir_name(repo_id: str) -> str:
+    org, name = repo_id.split("/", 1)
+    return f"models--{org.lower()}--{name}"
+
+
+def cleanup_duplicate_hf_hub_cache(cache_dir: Path = MODEL_CACHE_DIR) -> None:
+    """Remove redundant Hugging Face hub blob cache alongside LOCAL_MODEL_DIR."""
+    duplicate = cache_dir / hf_hub_cache_dir_name(HF_MODEL_REPO)
+    if duplicate.exists():
+        shutil.rmtree(duplicate, ignore_errors=True)
+
+    locks = cache_dir / ".locks"
+    if locks.exists():
+        shutil.rmtree(locks, ignore_errors=True)
 
 
 def clean_broken_model_cache(model_dir: Path = LOCAL_MODEL_DIR) -> None:
@@ -17,6 +38,7 @@ def download_embedding_model(*, force: bool = False) -> Path:
     """Download the ONNX embedding model used for semantic search."""
     LOCAL_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
     if is_model_installed() and not force:
+        cleanup_duplicate_hf_hub_cache()
         return LOCAL_MODEL_DIR
 
     if force and LOCAL_MODEL_DIR.exists():
@@ -39,4 +61,5 @@ def download_embedding_model(*, force: bool = False) -> Path:
             "Check your network connection and retry `uv run setup-models`."
         )
 
+    cleanup_duplicate_hf_hub_cache()
     return LOCAL_MODEL_DIR
