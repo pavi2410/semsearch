@@ -17,7 +17,7 @@ from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
 from ..storage import content_available, init_db, iter_page_metas, try_read_content
-from ..storage.embedding_cache import load_embedding, save_embedding
+from ..storage.embedding_cache import load_embedding, save_embeddings
 from ..storage.models import Link, Page, TargetUrl
 from ..storage.page import normalize_url
 from ..storage.url_intern import intern_urls
@@ -42,6 +42,7 @@ from .embedding_config import (
     MAX_CHUNKS_PER_DOC,
 )
 from .embedding_model import is_model_installed, load_embedder
+from .force_flags import extract_force_flags
 from .nlp import preprocess
 
 
@@ -167,13 +168,15 @@ def _embed_extracted_documents(
         all_chunks,
         embedder,
     )
+    batch_items: list[tuple[str, np.ndarray]] = []
     for doc_id, content_hash, chunks, start, end in spans:
         doc_vectors = vectors[start:end]
-        save_embedding(content_hash, doc_vectors)
+        batch_items.append((content_hash, doc_vectors))
         doc_embeddings[doc_id] = DocumentEmbedding(chunks=chunks, vectors=doc_vectors)
         embedded += 1
         progress.advance(task, 1)
 
+    save_embeddings(batch_items)
     return doc_embeddings, embedded
 
 
@@ -324,18 +327,22 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
 def _load_cached_embeddings(
     doc_ids: list[str],
     *,
-    force: bool,
+    force_embeddings: bool,
 ) -> tuple[dict[str, DocumentEmbedding], list[dict], int]:
     doc_embeddings: dict[str, DocumentEmbedding] = {}
     pending: list[dict] = []
     cached = 0
 
+    pages_by_id = {
+        page.url_hash: page
+        for page in Page.select().where(Page.url_hash.in_(doc_ids))
+    }
+
     for doc_id in doc_ids:
-        try:
-            page = Page.get_by_id(doc_id)
-        except Page.DoesNotExist:
+        page = pages_by_id.get(doc_id)
+        if page is None:
             continue
-        if not force:
+        if not force_embeddings:
             vectors = load_embedding(page.content_hash)
             if vectors is not None:
                 chunks = chunks_for_content(page.content_hash, page.url)
@@ -406,19 +413,26 @@ def _run_process_pool(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Build the BM25 search index")
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Reprocess all pages, ignoring cached tokens",
+    force_bm25, force_embeddings, argv = extract_force_flags(argv)
+
+    parser = argparse.ArgumentParser(
+        description="Build the BM25 search index",
+        epilog=(
+            "Force examples:\n"
+            "  index --force all\n"
+            "  index --force=bm25\n"
+            "  index --force=embeddings\n"
+            "  index --force=bm25,embeddings"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
 
     init_db()
     all_pages = list(iter_page_metas())
     pages, missing_content = filter_pages_with_content(all_pages)
     domains = Counter(page["url"].split("/")[2] for page in pages)
-    plan = plan_index(pages, force=args.force)
+    plan = plan_index(pages, force=force_bm25)
     previous_doc_ids = load_previous_doc_ids()
 
     console = Console()
@@ -430,8 +444,10 @@ def main(argv: list[str] | None = None) -> None:
         console.print(
             f"[yellow]Skipping {missing_content} pages with missing content files[/yellow]"
         )
-    if args.force:
-        console.print("[dim]Force mode — reprocessing all pages[/dim]")
+    if force_bm25:
+        console.print("[dim]Force bm25 — reprocessing all pages for BM25 tokens[/dim]")
+    if force_embeddings:
+        console.print("[dim]Force embeddings — ignoring embedding cache[/dim]")
 
     entries: dict[str, list[str]] = dict(plan.reused)
     skipped = 0
@@ -476,7 +492,7 @@ def main(argv: list[str] | None = None) -> None:
 
         doc_embeddings, pending, cached = _load_cached_embeddings(
             doc_ids,
-            force=args.force,
+            force_embeddings=force_embeddings,
         )
 
         embedded = 0

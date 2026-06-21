@@ -50,7 +50,7 @@ uv run search "your query"
 Re-index only changed pages (default). Force a full rebuild:
 
 ```sh
-uv run index --force
+uv run index --force all
 ```
 
 ## How It Works

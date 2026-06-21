@@ -1,6 +1,6 @@
 import numpy as np
 
-from .models import EmbeddingCache
+from .models import EmbeddingCache, db
 from .vector_codec import decode_vectors, encode_vectors, is_quantized_embedding
 
 
@@ -20,3 +20,11 @@ def save_embedding(content_hash: str, vectors: np.ndarray) -> None:
         content_hash=content_hash,
         payload=encode_vectors(np.asarray(vectors, dtype=np.float32)),
     ).execute()
+
+
+def save_embeddings(items: list[tuple[str, np.ndarray]]) -> None:
+    if not items:
+        return
+    with db.atomic():
+        for content_hash, vectors in items:
+            save_embedding(content_hash, vectors)
