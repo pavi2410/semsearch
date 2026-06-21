@@ -1,4 +1,4 @@
-from .models import SyncTokenCache as TokenCache
+from .models import TokenCache
 
 
 def load_tokens(content_hash: str) -> list[str] | None:

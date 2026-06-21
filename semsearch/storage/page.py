@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .content import save_content
-from .models import SyncPage as Page
+from .models import Page
 
 _LOCALE_QUERY_KEYS = frozenset({"locale", "lang", "language", "hl"})
 
@@ -82,54 +82,20 @@ def save_page(
     }
 
 
-async def async_save_page(
-    url: str,
-    html: str,
-    last_fetched: str,
-    *,
-    etag: str | None = None,
-    http_last_modified: str | None = None,
-) -> dict:
-    from .models import Page as AsyncPage, db
-
-    content_hash = save_content(html)
-    url = normalize_url(url)
-    h = url_hash(url)
-    await db.aexecute(
-        AsyncPage.replace(
-            url_hash=h,
-            url=url,
-            fetched_at=last_fetched,
-            content_hash=content_hash,
-            etag=etag,
-            http_last_modified=http_last_modified,
-        )
-    )
-    return {
-        "url": url,
-        "lastFetchedAt": last_fetched,
-        "contentHash": content_hash,
-        "etag": etag or "",
-        "httpLastModified": http_last_modified or "",
-    }
-
-
-async def async_touch_page(
+def touch_page(
     url: str,
     last_fetched: str,
     *,
     etag: str | None = None,
     http_last_modified: str | None = None,
 ) -> None:
-    from .models import Page as AsyncPage, db
-
     updates: dict[str, str] = {"fetched_at": last_fetched}
     if etag is not None:
         updates["etag"] = etag
     if http_last_modified is not None:
         updates["http_last_modified"] = http_last_modified
     h = url_hash(normalize_url(url))
-    await db.aexecute(AsyncPage.update(**updates).where(AsyncPage.url_hash == h))
+    Page.update(**updates).where(Page.url_hash == h).execute()
 
 
 def read_page_meta(url: str) -> dict | None:
@@ -137,17 +103,6 @@ def read_page_meta(url: str) -> dict | None:
     try:
         page = Page.get_by_id(h)
     except Page.DoesNotExist:
-        return None
-    return _page_meta(page)
-
-
-async def async_read_page_meta(url: str) -> dict | None:
-    from .models import Page as AsyncPage, db
-
-    h = url_hash(normalize_url(url))
-    try:
-        page = await db.get(AsyncPage.select().where(AsyncPage.url_hash == h))
-    except AsyncPage.DoesNotExist:
         return None
     return _page_meta(page)
 

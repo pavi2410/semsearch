@@ -2,7 +2,7 @@ import pickle
 
 import numpy as np
 
-from .models import SyncEmbeddingCache as EmbeddingCache
+from .models import EmbeddingCache
 
 
 def load_embedding(content_hash: str) -> np.ndarray | None:

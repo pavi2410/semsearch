@@ -18,8 +18,7 @@ from ..search.index_store import dump_index, load_previous_doc_ids
 from ..search.ranking import compute_pagerank_boosts
 from ..storage import content_available, init_db, iter_page_metas, try_read_content, url_hash
 from ..storage.embedding_cache import load_embedding, save_embedding
-from ..storage.models import SyncLink as Link
-from ..storage.models import SyncPage as Page
+from ..storage.models import Link, Page
 from ..storage.page import normalize_url
 from ..storage.token_cache import load_tokens, save_tokens
 from .embeddings import (

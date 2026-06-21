@@ -4,22 +4,22 @@ from playhouse.migrate import SqliteMigrator, migrate, operation
 import pickle
 
 from .models import (
-    SyncEmbeddingCache,
-    SyncLink,
-    SyncPage,
-    SyncTokenCache,
+    EmbeddingCache,
+    Link,
+    Page,
+    TokenCache,
     _PAGE_COLUMNS,
-    sync_db,
+    db,
 )
 
 
 def _table_columns(table: str) -> set[str]:
-    rows = sync_db.execute_sql(f"PRAGMA table_info({table})").fetchall()
+    rows = db.execute_sql(f"PRAGMA table_info({table})").fetchall()
     return {row[1] for row in rows}
 
 
 def _column_type(table: str, column: str) -> str | None:
-    rows = sync_db.execute_sql(f"PRAGMA table_info({table})").fetchall()
+    rows = db.execute_sql(f"PRAGMA table_info({table})").fetchall()
     for row in rows:
         if row[1] == column:
             return row[2]
@@ -27,7 +27,7 @@ def _column_type(table: str, column: str) -> str | None:
 
 
 def _link_index_names() -> set[str]:
-    rows = sync_db.execute_sql(
+    rows = db.execute_sql(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'links'"
     ).fetchall()
     return {row[0] for row in rows}
@@ -77,15 +77,15 @@ class SemsearchMigrator(SqliteMigrator):
 
 def run_schema_migrations() -> None:
     """Apply incremental schema changes to an existing semsearch.db."""
-    migrator = SemsearchMigrator(sync_db)
+    migrator = SemsearchMigrator(db)
     operations = []
 
     page_cols = _table_columns("pages")
     for column in _PAGE_COLUMNS:
         if column not in page_cols:
-            operations.append(migrator.add_column("pages", column, SyncPage._meta.fields[column]))
+            operations.append(migrator.add_column("pages", column, Page._meta.fields[column]))
 
-    sync_db.create_tables([SyncLink, SyncTokenCache, SyncEmbeddingCache], safe=True)
+    db.create_tables([Link, TokenCache, EmbeddingCache], safe=True)
 
     link_indexes = _link_index_names()
     if (
@@ -100,5 +100,5 @@ def run_schema_migrations() -> None:
     operations.append(migrator.clear_legacy_embedding_cache())
 
     if operations:
-        with sync_db.transaction():
+        with db.transaction():
             migrate(*operations)

@@ -15,14 +15,12 @@ from ..core.tui_util import (
     make_indeterminate_progress,
 )
 from ..storage import (
-    async_init_db,
-    async_read_page_meta,
-    async_save_page,
-    async_touch_page,
     init_db,
+    read_page_meta,
+    save_page,
+    touch_page,
     try_read_content,
 )
-from ..storage.models import db
 from ..storage.page import normalize_url
 from .blocks import BlockList
 from .content_filter import is_fetchable_document_url, is_indexable_page
@@ -267,13 +265,13 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             ctx.stats.inc("robots_blocked")
             return None
 
-        blocked, reason = await ctx.blocklist.is_blocked(url)
+        blocked, reason = await asyncio.to_thread(ctx.blocklist.is_blocked, url)
         if blocked:
             ctx.progress.print(f"  [red]Blocked[/red] ({reason}) {url}")
             ctx.stats.inc("blocked")
             return None
 
-        meta = await async_read_page_meta(url)
+        meta = await asyncio.to_thread(read_page_meta, url)
         if meta is not None and not is_stale(meta):
             links = _links_from_cached(meta, url)
             if links is not None:
@@ -331,7 +329,8 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 ctx.stats.inc("req_3xx")
                 now = _now()
                 resp_etag, resp_last_modified = parse_cache_headers(resp)
-                await async_touch_page(
+                await asyncio.to_thread(
+                    touch_page,
                     url,
                     now,
                     etag=resp_etag or meta.get("etag") or None,
@@ -368,7 +367,7 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 ctx.stats.inc("req_4xx" if 400 <= code < 500 else "req_5xx")
                 ctx.progress.print(f"  [red]HTTP {code}[/red] {url}")
                 retry_after = _parse_retry_after(e.response)
-                await ctx.blocklist.record(url, code, retry_after)
+                await asyncio.to_thread(ctx.blocklist.record, url, code, retry_after)
                 return None
 
             ctx.stats.inc("req_2xx")
@@ -394,7 +393,8 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
 
         ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
         now = _now()
-        await async_save_page(
+        await asyncio.to_thread(
+            save_page,
             url,
             body,
             now,
@@ -407,7 +407,8 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             if final_url not in ctx.visited:
                 ctx.visited.add(final_url)
                 ctx.stats.inc("visited")
-            await async_save_page(
+            await asyncio.to_thread(
+                save_page,
                 final_url,
                 body,
                 now,
@@ -472,30 +473,28 @@ def main() -> None:
 
     async def run() -> None:
         init_db()
-        await async_init_db()
-        async with db:
-            async with make_page_client() as client, make_aux_client() as aux_client:
-                with Live(display, refresh_per_second=4):
-                    task_id = progress.add_task("Crawling...", total=None)
+        async with make_page_client() as client, make_aux_client() as aux_client:
+            with Live(display, refresh_per_second=4):
+                task_id = progress.add_task("Crawling...", total=None)
 
-                    ctx = CrawlerContext(
-                        progress=progress,
-                        task_id=task_id,
-                        client=client,
-                        aux_client=aux_client,
-                        stats=stats,
-                    )
+                ctx = CrawlerContext(
+                    progress=progress,
+                    task_id=task_id,
+                    client=client,
+                    aux_client=aux_client,
+                    stats=stats,
+                )
 
-                    for url in SEED_URLS:
-                        await _enqueue_url(normalize_url(url), ctx)
+                for url in SEED_URLS:
+                    await _enqueue_url(normalize_url(url), ctx)
 
-                    try:
-                        await _crawl(ctx)
-                    except KeyboardInterrupt:
-                        progress.print("[yellow]Shutting down...[/yellow]")
-                        ctx.shutdown_event.set()
+                try:
+                    await _crawl(ctx)
+                except KeyboardInterrupt:
+                    progress.print("[yellow]Shutting down...[/yellow]")
+                    ctx.shutdown_event.set()
 
-                    progress.update(task_id, description="Crawling complete")
+                progress.update(task_id, description="Crawling complete")
 
             rprint()
             rprint(stats.summary())

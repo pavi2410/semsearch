@@ -1,7 +1,7 @@
 import pytest
 
 from semsearch.index.indexer import build_index_stats, filter_pages_with_content, plan_index
-from semsearch.storage.models import SyncPage as Page, SyncTokenCache, init_db
+from semsearch.storage.models import Page, TokenCache, init_db
 from semsearch.storage.token_cache import load_tokens, save_tokens
 
 
@@ -93,8 +93,8 @@ def test_persist_page_sets_indexed_content_hash(db):
 
     save_tokens("hash-a", ["hello"])
     row = (
-        SyncTokenCache.select(SyncTokenCache.tokens.json())
-        .where(SyncTokenCache.content_hash == "hash-a")
+        TokenCache.select(TokenCache.tokens.json())
+        .where(TokenCache.content_hash == "hash-a")
         .get()
     )
     assert row.tokens == ["hello"]

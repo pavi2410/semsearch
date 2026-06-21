@@ -5,7 +5,7 @@ import pytest
 
 from semsearch.index.embeddings import chunks_for_content
 from semsearch.storage.embedding_cache import load_embedding, save_embedding
-from semsearch.storage.models import SyncEmbeddingCache, init_db, migrate_schema, sync_db
+from semsearch.storage.models import EmbeddingCache, init_db, migrate_schema
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def test_embedding_cache_vectors_round_trip(db):
 
 def test_load_embedding_rejects_legacy_chunk_payload(db):
     legacy = pickle.dumps({"chunks": ["a"], "vectors": np.asarray([[1.0, 0.0]], dtype=np.float32)})
-    SyncEmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
+    EmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
     assert load_embedding("legacy") is None
 
 
@@ -34,11 +34,11 @@ def test_migrate_schema_clears_legacy_embedding_cache(tmp_path):
     legacy = pickle.dumps(
         {"chunks": ["a"], "vectors": np.asarray([[1.0, 0.0]], dtype=np.float32)}
     )
-    SyncEmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
+    EmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
 
     migrate_schema()
 
-    assert SyncEmbeddingCache.select().count() == 0
+    assert EmbeddingCache.select().count() == 0
 
 
 def test_migrate_schema_keeps_vector_only_embedding_cache(tmp_path):
@@ -48,7 +48,7 @@ def test_migrate_schema_keeps_vector_only_embedding_cache(tmp_path):
 
     migrate_schema()
 
-    assert SyncEmbeddingCache.select().count() == 1
+    assert EmbeddingCache.select().count() == 1
     assert np.allclose(load_embedding("ok"), vectors)
 
 

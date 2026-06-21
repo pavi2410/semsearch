@@ -1,32 +1,28 @@
-import pytest
-
-from semsearch.storage.models import async_init_db, db as async_db
-from semsearch.storage.page import async_read_page_meta, async_save_page
+from semsearch.storage.models import init_db
+from semsearch.storage.page import read_page_meta, save_page
 
 
-@pytest.mark.asyncio
-async def test_async_save_and_read_page_meta(tmp_path):
-    await async_init_db(tmp_path / "test.db")
-    async with async_db:
-        saved = await async_save_page(
-            "https://example.com/page",
-            "<html><body>Hello</body></html>",
-            "2026-06-20T00:00:00Z",
-            etag='"abc"',
-            http_last_modified="Wed, 21 Oct 2015 07:28:00 GMT",
-        )
+def test_save_and_read_page_meta(tmp_path):
+    init_db(tmp_path / "test.db")
+    saved = save_page(
+        "https://example.com/page",
+        "<html><body>hello</body></html>",
+        "2024-01-01T00:00:00Z",
+        etag='"abc"',
+        http_last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
+    )
 
-        meta = await async_read_page_meta("https://example.com/page")
+    meta = read_page_meta("https://example.com/page")
 
-    assert meta == saved
+    assert saved["url"] == "https://example.com/page"
     assert meta is not None
     assert meta["url"] == "https://example.com/page"
+    assert meta["lastFetchedAt"] == "2024-01-01T00:00:00Z"
     assert meta["etag"] == '"abc"'
-    assert meta["httpLastModified"] == "Wed, 21 Oct 2015 07:28:00 GMT"
+    assert meta["httpLastModified"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+    assert meta["contentHash"]
 
 
-@pytest.mark.asyncio
-async def test_async_read_page_meta_missing(tmp_path):
-    await async_init_db(tmp_path / "test.db")
-    async with async_db:
-        assert await async_read_page_meta("https://example.com/missing") is None
+def test_read_page_meta_missing(tmp_path):
+    init_db(tmp_path / "test.db")
+    assert read_page_meta("https://example.com/missing") is None

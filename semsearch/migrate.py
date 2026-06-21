@@ -49,7 +49,7 @@ def _migrate_pages(console: Console) -> int:
         f"Migrating [bold]{len(files)}[/bold] page metadata files from {OLD_PAGES_DIR}"
     )
 
-    from .storage.models import SyncPage as Page
+    from .storage.models import Page
 
     rows = []
     for fp in files:

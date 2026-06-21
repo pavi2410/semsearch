@@ -6,7 +6,7 @@ from rich.text import Text
 
 from ..index.nlp import preprocess
 from ..storage import init_db
-from ..storage.models import SyncPage as Page
+from ..storage.models import Page
 from .dedup import dedupe_results
 from .fusion import reciprocal_rank_fusion
 from .index_store import load_index
