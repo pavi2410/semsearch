@@ -28,7 +28,46 @@ def _column_type(table: str, column: str) -> str | None:
     return None
 
 
+def _link_has_target_foreign_key() -> bool:
+    rows = db.execute_sql("PRAGMA foreign_key_list('links')").fetchall()
+    return any(row[2] == "target_urls" and row[3] == "target_id" for row in rows)
+
+
 class SemsearchMigrator(SqliteMigrator):
+    @operation
+    def ensure_link_target_foreign_key(self):
+        link_cols = _table_columns("links")
+        if not link_cols or "target_id" not in link_cols:
+            return None
+        if _link_has_target_foreign_key():
+            return None
+
+        return [
+            SQL(
+                """
+                CREATE TABLE "links_fk" (
+                    "source_hash" TEXT NOT NULL,
+                    "target_id" INTEGER NOT NULL REFERENCES "target_urls" ("id"),
+                    UNIQUE ("source_hash", "target_id")
+                )
+                """
+            ),
+            SQL(
+                """
+                INSERT INTO "links_fk" ("source_hash", "target_id")
+                SELECT "source_hash", "target_id" FROM "links"
+                """
+            ),
+            SQL('DROP TABLE "links"'),
+            SQL('ALTER TABLE "links_fk" RENAME TO "links"'),
+            SQL(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS "link_source_hash_target_id"
+                ON "links" ("source_hash", "target_id")
+                """
+            ),
+        ]
+
     @operation
     def drop_legacy_links_table(self):
         link_cols = _table_columns("links")
@@ -95,6 +134,10 @@ def run_schema_migrations() -> None:
             migrate(*operations)
 
     db.create_tables([TargetUrl, Link, TokenCache, EmbeddingCache], safe=True)
+
+    fk_operations = [migrator.ensure_link_target_foreign_key()]
+    with db.transaction():
+        migrate(*fk_operations)
 
     operations = [
         migrator.convert_token_cache_tokens_to_jsonb(),

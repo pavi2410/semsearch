@@ -1,13 +1,20 @@
 from pathlib import Path
 
-from peewee import AutoField, BlobField, BooleanField, FloatField, IntegerField, Model, SqliteDatabase, TextField
+from peewee import (
+    AutoField,
+    BlobField,
+    BooleanField,
+    FloatField,
+    ForeignKeyField,
+    Model,
+    SqliteDatabase,
+    TextField,
+)
 from playhouse.sqlite_ext import JSONBField
 
-_DB_PATH = Path("data") / "semsearch.db"
+from .sqlite_config import SQLITE_PRAGMAS, SQLITE_TIMEOUT_SEC
 
-_PRAGMAS = {
-    "journal_mode": "wal",  # writes don't block reads
-}
+_DB_PATH = Path("data") / "semsearch.db"
 
 _PAGE_COLUMNS = {
     "description": "TEXT",
@@ -41,9 +48,12 @@ def migrate_schema() -> None:
 
 def init_db(path: Path = _DB_PATH) -> None:
     """Initialise the database."""
-    db.init(_db_path_str(path), pragmas=_PRAGMAS)
-    db.create_tables([Page, Block, TargetUrl, Link, TokenCache, EmbeddingCache], safe=True)
+    db.init(_db_path_str(path), pragmas=SQLITE_PRAGMAS, timeout=SQLITE_TIMEOUT_SEC)
     migrate_schema()
+    db.create_tables(
+        [Page, Block, TargetUrl, Link, TokenCache, EmbeddingCache],
+        safe=True,
+    )
 
 
 class BaseModel(Model):
@@ -95,7 +105,7 @@ class TargetUrl(BaseModel):
 
 class Link(BaseModel):
     source_hash = TextField()
-    target_id = IntegerField()
+    target = ForeignKeyField(TargetUrl, column_name="target_id")
 
     class Meta:
         table_name = "links"
