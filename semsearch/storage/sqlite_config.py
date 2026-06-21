@@ -6,6 +6,9 @@ _CACHE_SIZE_KIB = 64 * 1024
 # Memory-map up to 256 MiB of the database file for read-heavy search.
 _MMAP_SIZE_BYTES = 256 * 1024 * 1024
 
+# Larger mmap for blob-heavy content.db during crawl/index passes.
+_CONTENT_MMAP_SIZE_BYTES = 512 * 1024 * 1024
+
 # Wait up to 30s when the database is locked (crawler + indexer overlap).
 SQLITE_TIMEOUT_SEC = 30
 
@@ -22,6 +25,12 @@ SQLITE_PRAGMAS = {
     "temp_store": "MEMORY",
     # Speed up read-only search queries over a large local DB.
     "mmap_size": _MMAP_SIZE_BYTES,
+}
+
+CONTENT_DB_PRAGMAS = {
+    **SQLITE_PRAGMAS,
+    "page_size": 65536,
+    "mmap_size": _CONTENT_MMAP_SIZE_BYTES,
 }
 
 

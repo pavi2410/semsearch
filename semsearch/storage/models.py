@@ -15,6 +15,7 @@ from playhouse.sqlite_ext import JSONBField
 from .sqlite_config import SQLITE_PRAGMAS, SQLITE_TIMEOUT_SEC
 
 _DB_PATH = Path("data") / "semsearch.db"
+_MAIN_DB_PATH = _DB_PATH
 
 _PAGE_COLUMNS = {
     "description": "TEXT",
@@ -39,16 +40,29 @@ def _db_path_str(path: Path) -> str:
     return str(path)
 
 
+def main_db_path() -> Path:
+    return _MAIN_DB_PATH
+
+
 def migrate_schema() -> None:
     """Add new columns/tables to existing databases without dropping data."""
+    from .content_models import ensure_content_db
     from .schema_migrate import run_schema_migrations
 
+    ensure_content_db()
     run_schema_migrations()
 
 
 def init_db(path: Path = _DB_PATH) -> None:
     """Initialise the database."""
+    global _MAIN_DB_PATH
+    from .content_migrate import set_storage_paths
+    from .content_models import init_content_db
+
+    _MAIN_DB_PATH = path
+    set_storage_paths(path)
     db.init(_db_path_str(path), pragmas=SQLITE_PRAGMAS, timeout=SQLITE_TIMEOUT_SEC)
+    init_content_db(path.parent / "content.db")
     migrate_schema()
     db.create_tables(
         [Page, Block, TargetUrl, Link, TokenCache, EmbeddingCache],

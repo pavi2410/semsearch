@@ -6,6 +6,7 @@ from playhouse.migrate import migrate
 def test_run_schema_migrations_is_idempotent(tmp_path):
     db_path = tmp_path / "test.db"
     init_db(db_path)
+    assert (tmp_path / "content.db").is_file()
     run_schema_migrations()
     run_schema_migrations()
 

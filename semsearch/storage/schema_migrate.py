@@ -11,7 +11,7 @@ from .models import (
     _PAGE_COLUMNS,
     db,
 )
-from .content_migrate import migrate_legacy_content_hashes
+from .content_migrate import migrate_filesystem_to_content_db
 from .vector_codec import is_quantized_embedding
 
 
@@ -145,4 +145,4 @@ def run_schema_migrations() -> None:
     with db.transaction():
         migrate(*operations)
 
-    migrate_legacy_content_hashes()
+    migrate_filesystem_to_content_db()
