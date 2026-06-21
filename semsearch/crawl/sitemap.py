@@ -43,7 +43,7 @@ class SitemapLoader:
 
         try:
             resp = await self._client.get(
-                sitemap_url, headers=_HEADERS, follow_redirects=True, timeout=10
+                sitemap_url, headers=_HEADERS, follow_redirects=True, timeout=30
             )
             if resp.status_code != 200:
                 return

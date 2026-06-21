@@ -81,6 +81,7 @@ class CrawlStats:
     req_4xx: int = 0
     req_5xx: int = 0
     error_net: int = 0
+    pool_retries: int = 0
     # crawl data
     visited: int = 0
     pages_new: int = 0

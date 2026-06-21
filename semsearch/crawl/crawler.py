@@ -46,6 +46,26 @@ HTTP_HEADERS = {
 MAX_CONCURRENT_PER_DOMAIN = 2
 RATE_LIMIT_DELAY = 1.0  # minimum seconds between requests to the same domain
 REFETCH_INTERVAL = 86400  # seconds before a cached page is considered stale (24h)
+SITEMAP_MAX_URLS = 5000  # cap per domain to avoid queue explosion
+HTTP_POOL_LIMITS = httpx.Limits(max_connections=30, max_keepalive_connections=15)
+AUX_POOL_LIMITS = httpx.Limits(max_connections=15, max_keepalive_connections=8)
+HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=60.0)
+FETCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=60.0)
+HTTP_GET_RETRIES = 3
+
+
+def make_page_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(limits=HTTP_POOL_LIMITS, timeout=HTTP_TIMEOUT)
+
+
+def make_aux_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(limits=AUX_POOL_LIMITS, timeout=HTTP_TIMEOUT)
+
+
+def cap_sitemap_urls(urls: list[str], limit: int = SITEMAP_MAX_URLS) -> list[str]:
+    if len(urls) <= limit:
+        return urls
+    return urls[:limit]
 
 
 def get_rate_limit_wait(
@@ -107,7 +127,9 @@ class CrawlerContext:
     progress: Progress
     task_id: TaskID
     client: httpx.AsyncClient
+    aux_client: httpx.AsyncClient
     domain_sems: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+    domain_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     domain_last_fetch: dict[str, float] = field(default_factory=dict)
     robots_cache: RobotsCache = field(init=False)
     shutdown_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -117,11 +139,79 @@ class CrawlerContext:
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     sitemap_loader: SitemapLoader = field(init=False)
     blocklist: BlockList = field(init=False)
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        self.robots_cache = RobotsCache(self.client, default_delay=RATE_LIMIT_DELAY)
-        self.sitemap_loader = SitemapLoader(self.client)
+        self.robots_cache = RobotsCache(self.aux_client, default_delay=RATE_LIMIT_DELAY)
+        self.sitemap_loader = SitemapLoader(self.aux_client)
         self.blocklist = BlockList()
+
+
+def _domain_lock(ctx: CrawlerContext, domain: str) -> asyncio.Lock:
+    if domain not in ctx.domain_locks:
+        ctx.domain_locks[domain] = asyncio.Lock()
+    return ctx.domain_locks[domain]
+
+
+async def _http_get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout: httpx.Timeout,
+    ctx: CrawlerContext,
+) -> httpx.Response:
+    last_error: Exception | None = None
+    for attempt in range(HTTP_GET_RETRIES):
+        try:
+            return await client.get(
+                url,
+                headers=headers,
+                follow_redirects=True,
+                timeout=timeout,
+            )
+        except httpx.PoolTimeout as exc:
+            last_error = exc
+            if attempt + 1 >= HTTP_GET_RETRIES:
+                break
+            wait = float(attempt + 1)
+            ctx.progress.print(
+                f"  [dim]Pool busy, retrying in {wait:.0f}s[/dim] {url}"
+            )
+            ctx.stats.inc("pool_retries")
+            await asyncio.sleep(wait)
+    assert last_error is not None
+    raise last_error
+
+
+async def _load_domain_sitemap(
+    ctx: CrawlerContext, domain: str, sitemap_urls: list[str]
+) -> None:
+    try:
+        page_urls = await ctx.sitemap_loader.load(domain, sitemap_urls)
+        capped = cap_sitemap_urls(page_urls)
+        if len(page_urls) > len(capped):
+            ctx.progress.print(
+                f"  [dim]Sitemap {domain}: capped at {len(capped):,} URLs[/dim]"
+            )
+        ctx.progress.print(f"  [cyan]Sitemap[/cyan] {domain}: {len(capped):,} URLs")
+        ctx.stats.inc("sitemap_urls", by=len(capped))
+        for page_url in capped:
+            if ctx.shutdown_event.is_set():
+                return
+            norm = normalize_url(page_url)
+            if norm not in ctx.visited and is_fetchable_document_url(norm):
+                ctx.visited.add(norm)
+                ctx.stats.inc("visited")
+                await ctx.queue.put(norm)
+    except Exception as e:
+        ctx.progress.print(f"  [red]Sitemap error[/red] {domain}: {e}")
+
+
+def _track_background_task(ctx: CrawlerContext, coro) -> None:
+    task = asyncio.create_task(coro)
+    ctx.background_tasks.add(task)
+    task.add_done_callback(ctx.background_tasks.discard)
 
 
 async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
@@ -135,19 +225,16 @@ async def _enqueue_url(url: str, ctx: CrawlerContext) -> None:
     await ctx.queue.put(url)
 
     domain = urlparse(url).hostname
-    if domain and domain not in ctx.seen_domains:
-        ctx.seen_domains.add(domain)
-        ctx.stats.inc("domains_discovered")
-        sitemap_urls = await ctx.robots_cache.sitemaps(domain)
-        page_urls = await ctx.sitemap_loader.load(domain, sitemap_urls)
-        ctx.progress.print(f"  [cyan]Sitemap[/cyan] {domain}: {len(page_urls)} URLs")
-        ctx.stats.inc("sitemap_urls", by=len(page_urls))
-        for page_url in page_urls:
-            norm = normalize_url(page_url)
-            if norm not in ctx.visited and is_fetchable_document_url(norm):
-                ctx.visited.add(norm)
-                ctx.stats.inc("visited")
-                await ctx.queue.put(norm)
+    if domain:
+        async with _domain_lock(ctx, domain):
+            if domain in ctx.seen_domains:
+                return
+            ctx.seen_domains.add(domain)
+            ctx.stats.inc("domains_discovered")
+            sitemap_urls = await ctx.robots_cache.sitemaps(domain)
+        _track_background_task(
+            ctx, _load_domain_sitemap(ctx, domain, sitemap_urls)
+        )
 
 
 def _parse_retry_after(response: httpx.Response) -> float | None:
@@ -214,31 +301,40 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
             ctx.stats.inc("requests")
             request_headers = {**HTTP_HEADERS, **build_conditional_headers(meta)}
             try:
-                resp = await ctx.client.get(
+                resp = await _http_get_with_retry(
+                    ctx.client,
                     url,
                     headers=request_headers,
-                    follow_redirects=True,
-                    timeout=5,
+                    timeout=FETCH_TIMEOUT,
+                    ctx=ctx,
                 )
-                if resp.status_code == 304:
-                    if meta is None:
-                        ctx.progress.print(f"  [yellow]Unexpected 304[/yellow] {url}")
-                        return None
-                    ctx.stats.inc("not_modified")
-                    ctx.stats.inc("req_3xx")
-                    now = _now()
-                    resp_etag, resp_last_modified = parse_cache_headers(resp)
-                    await async_touch_page(
-                        url,
-                        now,
-                        etag=resp_etag or meta.get("etag") or None,
-                        http_last_modified=resp_last_modified
-                        or meta.get("httpLastModified")
-                        or None,
-                    )
-                    ctx.progress.print(f"  Not modified {url}")
-                    return _links_from_cached(meta, url)
+            except Exception as e:
+                ctx.stats.inc("error_net")
+                ctx.progress.print(f"  [red]Error[/red] fetching {url}: {e}")
+                return None
+            finally:
+                ctx.domain_last_fetch[domain] = time.time()
 
+            if resp.status_code == 304:
+                if meta is None:
+                    ctx.progress.print(f"  [yellow]Unexpected 304[/yellow] {url}")
+                    return None
+                ctx.stats.inc("not_modified")
+                ctx.stats.inc("req_3xx")
+                now = _now()
+                resp_etag, resp_last_modified = parse_cache_headers(resp)
+                await async_touch_page(
+                    url,
+                    now,
+                    etag=resp_etag or meta.get("etag") or None,
+                    http_last_modified=resp_last_modified
+                    or meta.get("httpLastModified")
+                    or None,
+                )
+                ctx.progress.print(f"  Not modified {url}")
+                return _links_from_cached(meta, url)
+
+            try:
                 resp.raise_for_status()
                 body = resp.text
             except httpx.HTTPStatusError as e:
@@ -248,65 +344,59 @@ async def _fetch_and_save(url: str, ctx: CrawlerContext) -> list[str] | None:
                 retry_after = _parse_retry_after(e.response)
                 await ctx.blocklist.record(url, code, retry_after)
                 return None
-            except Exception as e:
-                ctx.stats.inc("error_net")
-                ctx.progress.print(f"  [red]Error[/red] fetching {url}: {e}")
-                return None
-            finally:
-                ctx.domain_last_fetch[domain] = time.time()
 
             ctx.stats.inc("req_2xx")
             ctx.stats.inc("req_3xx", by=len(resp.history))
-
             content_type = resp.headers.get("Content-Type")
-            if not is_indexable_page(url, body, content_type):
-                ctx.progress.print(
-                    f"  [yellow]Skipping unsupported content[/yellow] {url}"
-                    f" ({content_type or 'unknown type'})"
-                )
-                ctx.stats.inc("skipped")
-                return None
-
-            language = detect_page_language(body, content_type)
-            if not is_crawlable_language(language):
-                ctx.progress.print(
-                    f"  [yellow]Skipping non-English[/yellow] {url} ({language})"
-                )
-                ctx.stats.inc("language_skipped")
-                return None
-
-            ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
-            now = _now()
             etag, http_last_modified = parse_cache_headers(resp)
+
+        if not is_indexable_page(url, body, content_type):
+            ctx.progress.print(
+                f"  [yellow]Skipping unsupported content[/yellow] {url}"
+                f" ({content_type or 'unknown type'})"
+            )
+            ctx.stats.inc("skipped")
+            return None
+
+        language = detect_page_language(body, content_type)
+        if not is_crawlable_language(language):
+            ctx.progress.print(
+                f"  [yellow]Skipping non-English[/yellow] {url} ({language})"
+            )
+            ctx.stats.inc("language_skipped")
+            return None
+
+        ctx.stats.inc("pages_new" if is_new_page else "pages_refreshed")
+        now = _now()
+        await async_save_page(
+            url,
+            body,
+            now,
+            etag=etag,
+            http_last_modified=http_last_modified,
+        )
+
+        final_url = normalize_url(str(resp.url))
+        if final_url != url:
+            if final_url not in ctx.visited:
+                ctx.visited.add(final_url)
+                ctx.stats.inc("visited")
             await async_save_page(
-                url,
+                final_url,
                 body,
                 now,
                 etag=etag,
                 http_last_modified=http_last_modified,
             )
+            ctx.progress.print(f"  Saved {url} -> {final_url}")
+        else:
+            ctx.progress.print(f"  Saved {url}")
 
-            final_url = normalize_url(str(resp.url))
-            if final_url != url:
-                if final_url not in ctx.visited:
-                    ctx.visited.add(final_url)
-                    ctx.stats.inc("visited")
-                await async_save_page(
-                    final_url,
-                    body,
-                    now,
-                    etag=etag,
-                    http_last_modified=http_last_modified,
-                )
-                ctx.progress.print(f"  Saved {url} -> {final_url}")
-            else:
-                ctx.progress.print(f"  Saved {url}")
-
-            return [
-                link
-                for link in extract_outbound_links(body, url)
-                if is_fetchable_document_url(link)
-            ]
+        return [
+            link
+            for link in extract_outbound_links(body, url)
+            if is_fetchable_document_url(link)
+        ]
     finally:
         ctx.stats.inc("in_flight", by=-1)
 
@@ -333,7 +423,12 @@ async def _worker(ctx: CrawlerContext) -> None:
 async def _crawl(ctx: CrawlerContext, num_workers: int = 10) -> None:
     workers = [asyncio.create_task(_worker(ctx)) for _ in range(num_workers)]
     try:
-        await ctx.queue.join()
+        while True:
+            await ctx.queue.join()
+            pending = [task for task in ctx.background_tasks if not task.done()]
+            if not pending:
+                break
+            await asyncio.gather(*pending, return_exceptions=True)
     except asyncio.CancelledError:
         pass
     finally:
@@ -353,7 +448,7 @@ def main() -> None:
         init_db()
         await async_init_db()
         async with db:
-            async with httpx.AsyncClient() as client:
+            async with make_page_client() as client, make_aux_client() as aux_client:
                 with Live(display, refresh_per_second=4):
                     task_id = progress.add_task("Crawling...", total=None)
 
@@ -361,6 +456,7 @@ def main() -> None:
                         progress=progress,
                         task_id=task_id,
                         client=client,
+                        aux_client=aux_client,
                         stats=stats,
                     )
 

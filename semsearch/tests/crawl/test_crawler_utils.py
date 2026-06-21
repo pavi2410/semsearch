@@ -5,6 +5,7 @@ import httpx
 from semsearch.crawl.crawler import (
     _parse_retry_after,
     build_conditional_headers,
+    cap_sitemap_urls,
     get_rate_limit_wait,
     is_stale,
     parse_cache_headers,
@@ -131,3 +132,9 @@ def test_parse_cache_headers():
         '"etag-value"',
         "Wed, 21 Oct 2015 07:28:00 GMT",
     )
+
+
+def test_cap_sitemap_urls():
+    urls = [f"https://example.com/{i}" for i in range(10)]
+    assert cap_sitemap_urls(urls, limit=3) == urls[:3]
+    assert cap_sitemap_urls(urls, limit=20) == urls
