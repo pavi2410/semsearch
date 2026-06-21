@@ -41,6 +41,13 @@ def _table_columns(database: SqliteDatabase, table: str) -> set[str]:
     return {row[1] for row in rows}
 
 
+def _link_index_names() -> set[str]:
+    rows = sync_db.execute_sql(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'links'"
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
 def migrate_schema() -> None:
     """Add new columns/tables to existing databases without dropping data."""
     page_cols = _table_columns(sync_db, "pages")
@@ -49,6 +56,13 @@ def migrate_schema() -> None:
             sync_db.execute_sql(f"ALTER TABLE pages ADD COLUMN {column} {sql_type}")
 
     sync_db.create_tables([SyncLink, SyncTokenCache, SyncEmbeddingCache], safe=True)
+
+    link_indexes = _link_index_names()
+    if (
+        "link_source_hash_target_url" in link_indexes
+        and "synclink_source_hash_target_url" in link_indexes
+    ):
+        sync_db.execute_sql("DROP INDEX IF EXISTS synclink_source_hash_target_url")
 
 
 def init_db(path: Path = _DB_PATH) -> None:
@@ -111,7 +125,6 @@ class Link(BaseModel):
     class Meta:
         table_name = "links"
         primary_key = False
-        indexes = ((("source_hash", "target_url"), True),)
 
 
 class SyncPage(Model):
