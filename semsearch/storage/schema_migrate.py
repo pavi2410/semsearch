@@ -1,8 +1,6 @@
 from peewee import SQL
 from playhouse.migrate import SqliteMigrator, migrate, operation
 
-import pickle
-
 from .models import (
     Block,
     EmbeddingCache,
@@ -13,6 +11,7 @@ from .models import (
     _PAGE_COLUMNS,
     db,
 )
+from .vector_codec import is_quantized_embedding
 
 
 def _table_columns(table: str) -> set[str]:
@@ -110,8 +109,7 @@ class SemsearchMigrator(SqliteMigrator):
         ).fetchone()
         if row is None:
             return None
-        payload = pickle.loads(row[0])
-        if not isinstance(payload, dict):
+        if is_quantized_embedding(row[0]):
             return None
         return SQL('DELETE FROM "embedding_cache"')
 

@@ -6,13 +6,13 @@ from semsearch.search.semantic import semantic_scores
 
 
 def test_semantic_scores_picks_best_chunk_per_document(monkeypatch):
-    embedding_index = EmbeddingIndex(
+    embedding_index = EmbeddingIndex.from_vectors(
         model_name="test-model",
         chunk_doc_ids=["doc-a", "doc-a", "doc-b"],
         vectors=np.asarray(
             [
                 [1.0, 0.0],
-                [0.2, 0.8],
+                [0.24253563, 0.9701425],
                 [0.0, 1.0],
             ],
             dtype=np.float32,
@@ -25,6 +25,6 @@ def test_semantic_scores_picks_best_chunk_per_document(monkeypatch):
 
     scores = semantic_scores("example", embedding_index, ["doc-a", "doc-b", "doc-c"])
 
-    assert scores["doc-a"] == pytest.approx(0.8)
-    assert scores["doc-b"] == pytest.approx(1.0)
+    assert scores["doc-a"] == pytest.approx(0.9701425, abs=0.02)
+    assert scores["doc-b"] == pytest.approx(1.0, abs=0.02)
     assert "doc-c" not in scores

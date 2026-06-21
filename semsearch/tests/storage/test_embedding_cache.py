@@ -24,12 +24,24 @@ def test_embedding_cache_vectors_round_trip(db):
 
 
 def test_load_embedding_rejects_legacy_chunk_payload(db):
+    import pickle
+
     legacy = pickle.dumps({"chunks": ["a"], "vectors": np.asarray([[1.0, 0.0]], dtype=np.float32)})
     EmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
     assert load_embedding("legacy") is None
 
 
+def test_load_embedding_rejects_float32_pickle_payload(db):
+    import pickle
+
+    legacy = pickle.dumps(np.asarray([[1.0, 0.0]], dtype=np.float32))
+    EmbeddingCache.replace(content_hash="legacy", payload=legacy).execute()
+    assert load_embedding("legacy") is None
+
+
 def test_migrate_schema_clears_legacy_embedding_cache(tmp_path):
+    import pickle
+
     init_db(tmp_path / "test.db")
     legacy = pickle.dumps(
         {"chunks": ["a"], "vectors": np.asarray([[1.0, 0.0]], dtype=np.float32)}
@@ -41,7 +53,21 @@ def test_migrate_schema_clears_legacy_embedding_cache(tmp_path):
     assert EmbeddingCache.select().count() == 0
 
 
-def test_migrate_schema_keeps_vector_only_embedding_cache(tmp_path):
+def test_migrate_schema_clears_float32_pickle_cache(tmp_path):
+    import pickle
+
+    init_db(tmp_path / "test.db")
+    EmbeddingCache.replace(
+        content_hash="legacy",
+        payload=pickle.dumps(np.asarray([[1.0, 0.0]], dtype=np.float32)),
+    ).execute()
+
+    migrate_schema()
+
+    assert EmbeddingCache.select().count() == 0
+
+
+def test_migrate_schema_keeps_quantized_embedding_cache(tmp_path):
     init_db(tmp_path / "test.db")
     vectors = np.asarray([[1.0, 0.0]], dtype=np.float32)
     save_embedding("ok", vectors)

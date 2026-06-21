@@ -6,6 +6,7 @@ from fastembed import TextEmbedding
 from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..storage.content import try_read_content
+from ..storage.vector_codec import decode_vectors, encode_vectors
 from .chunking import chunk_text
 from .embedding_config import EMBED_CHUNK_BATCH_SIZE, EMBED_PARALLEL
 from .embedding_model import DEFAULT_MODEL, load_embedder
@@ -23,7 +24,24 @@ class DocumentEmbedding:
 class EmbeddingIndex:
     model_name: str
     chunk_doc_ids: list[str]
-    vectors: np.ndarray
+    payload: bytes
+
+    @classmethod
+    def from_vectors(
+        cls,
+        model_name: str,
+        chunk_doc_ids: list[str],
+        vectors: np.ndarray,
+    ) -> EmbeddingIndex:
+        return cls(
+            model_name=model_name,
+            chunk_doc_ids=chunk_doc_ids,
+            payload=encode_vectors(np.asarray(vectors, dtype=np.float32)),
+        )
+
+    @property
+    def vectors(self) -> np.ndarray:
+        return decode_vectors(self.payload)
 
 
 def build_document_text(page_meta: PageMetadata) -> str:
@@ -101,7 +119,7 @@ def build_embedding_index(
     if not vector_rows:
         return None
 
-    return EmbeddingIndex(
+    return EmbeddingIndex.from_vectors(
         model_name=model_name,
         chunk_doc_ids=chunk_doc_ids,
         vectors=np.vstack(vector_rows),

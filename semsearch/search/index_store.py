@@ -13,7 +13,7 @@ MANIFEST_FILE = INDEX_DIR / "manifest.json"
 PAGERANK_FILE = INDEX_DIR / "pagerank.json"
 BM25_FILE = INDEX_DIR / "bm25.pkl"
 EMBEDDINGS_FILE = INDEX_DIR / "embeddings.pkl"
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 
 
 def _now() -> str:
@@ -67,7 +67,11 @@ def load_index() -> tuple[BM25Okapi, list[str], dict[str, float], EmbeddingIndex
     with open(BM25_FILE, "rb") as f:
         bm25 = pickle.load(f)
     embedding_index = None
-    if manifest.get("has_embeddings") and EMBEDDINGS_FILE.exists():
+    if (
+        manifest.get("version") == INDEX_VERSION
+        and manifest.get("has_embeddings")
+        and EMBEDDINGS_FILE.exists()
+    ):
         with open(EMBEDDINGS_FILE, "rb") as f:
             embedding_index = pickle.load(f)
     return bm25, manifest["doc_ids"], pagerank, embedding_index

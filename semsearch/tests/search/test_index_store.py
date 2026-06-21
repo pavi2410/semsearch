@@ -38,7 +38,7 @@ def test_dump_and_load_index_with_embeddings(index_dir):
     bm25 = BM25Okapi([["hello", "world"]])
     doc_ids = ["doc-a"]
     pagerank = {"doc-a": 1.0}
-    embedding_index = EmbeddingIndex(
+    embedding_index = EmbeddingIndex.from_vectors(
         model_name="test-model",
         chunk_doc_ids=["doc-a"],
         vectors=np.asarray([[1.0, 0.0]], dtype=np.float32),
@@ -63,3 +63,20 @@ def test_load_previous_doc_ids(index_dir):
     assert (index_dir / "manifest.json").exists()
     assert (index_dir / "pagerank.json").exists()
     assert (index_dir / "bm25.pkl").exists()
+
+
+def test_load_index_ignores_embeddings_from_older_manifest(index_dir):
+    bm25 = BM25Okapi([["hello", "world"]])
+    embedding_index = EmbeddingIndex.from_vectors(
+        model_name="test-model",
+        chunk_doc_ids=["doc-a"],
+        vectors=np.asarray([[1.0, 0.0]], dtype=np.float32),
+    )
+    dump_index(bm25, ["doc-a"], {"doc-a": 1.0}, embedding_index)
+
+    manifest_path = index_dir / "manifest.json"
+    manifest = manifest_path.read_text(encoding="utf-8").replace('"version": 3', '"version": 2')
+    manifest_path.write_text(manifest, encoding="utf-8")
+
+    _, _, _, loaded_embeddings = load_index()
+    assert loaded_embeddings is None
