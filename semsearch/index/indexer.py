@@ -16,7 +16,7 @@ from ..core.tui_util import make_determinate_progress, run_with_progress_refresh
 from ..crawl.content_filter import is_indexable_page
 from ..crawl.metadata import PageMetadata, extract_page_metadata
 from ..search.index_store import dump_index, load_previous_doc_ids
-from ..search.ranking import compute_pagerank_boosts
+from ..search.ranking import PAGERANK_ITERATIONS, compute_pagerank_boosts
 from ..storage import content_available, init_db, iter_page_metas, try_read_content
 from ..storage.embedding_cache import load_embedding_payload, save_embeddings
 from ..storage.models import Link, Page, TargetUrl
@@ -309,7 +309,7 @@ def _clear_index_state(doc_id: str) -> None:
     Page.update(indexed_content_hash=None).where(Page.url_hash == doc_id).execute()
 
 
-def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
+def _build_pagerank(doc_ids: list[str], *, progress=None) -> dict[str, float]:
     doc_id_set = set(doc_ids)
     url_to_doc = {
         normalize_url(page.url): page.url_hash
@@ -322,7 +322,15 @@ def _build_pagerank(doc_ids: list[str]) -> dict[str, float]:
         .join(TargetUrl, on=(Link.target_id == TargetUrl.id))
         .tuples()
     ]
-    return compute_pagerank_boosts(doc_ids, url_to_doc, links)
+    task = None
+    if progress is not None:
+        task = progress.add_task(
+            "Computing PageRank",
+            total=len(links) + PAGERANK_ITERATIONS,
+        )
+    return compute_pagerank_boosts(
+        doc_ids, url_to_doc, links, progress=progress, task=task
+    )
 
 
 def _load_cached_embeddings(
@@ -516,8 +524,9 @@ def main(argv: list[str] | None = None) -> None:
     corpus_tokens = [entries[doc_id] for doc_id in doc_ids]
     console.print("[dim]Building BM25 index...[/dim]")
     bm25 = BM25Okapi(corpus_tokens)
-    console.print("[dim]Computing PageRank...[/dim]")
-    pagerank = _build_pagerank(doc_ids)
+    pagerank_progress = make_determinate_progress(unit="step/s")
+    with pagerank_progress:
+        pagerank = _build_pagerank(doc_ids, progress=pagerank_progress)
     embedding_index = None
     if is_model_installed():
         console.print("[dim]Loading embedding model...[/dim]")

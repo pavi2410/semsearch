@@ -114,15 +114,20 @@ def lexical_match_boost(query: str, query_tokens: list[str], doc: dict[str, str]
     return 1.0
 
 
+PAGERANK_ITERATIONS = 20
+
+
 def compute_pagerank_boosts(
     doc_ids: list[str],
     url_to_doc: dict[str, str],
     links: list[tuple[str, str]],
     *,
-    iterations: int = 20,
+    iterations: int = PAGERANK_ITERATIONS,
     damping: float = 0.85,
     min_boost: float = 1.0,
     max_boost: float = 1.3,
+    progress=None,
+    task=None,
 ) -> dict[str, float]:
     """Compute PageRank over indexed pages and map ranks to score multipliers.
 
@@ -137,10 +142,14 @@ def compute_pagerank_boosts(
     outlinks: dict[str, list[str]] = {doc_id: [] for doc_id in doc_ids}
     for source_hash, target_url in links:
         if source_hash not in doc_set:
+            if progress is not None and task is not None:
+                progress.advance(task)
             continue
         target_hash = url_to_doc.get(target_url)
         if target_hash in doc_set:
             outlinks[source_hash].append(target_hash)
+        if progress is not None and task is not None:
+            progress.advance(task)
 
     count = len(doc_ids)
     ranks = {doc_id: 1.0 / count for doc_id in doc_ids}
@@ -158,6 +167,8 @@ def compute_pagerank_boosts(
                 for doc_id in doc_ids:
                     next_ranks[doc_id] += per_doc
         ranks = next_ranks
+        if progress is not None and task is not None:
+            progress.advance(task)
 
     log_ranks = {doc_id: math.log(ranks[doc_id]) for doc_id in doc_ids}
     min_log = min(log_ranks.values())
